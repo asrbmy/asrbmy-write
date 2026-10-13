@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="writer-token" content="__TOKEN__">
+<title>Writer</title>
+<link rel="icon" href="/app/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body>
+<header class="top">
+  <button type="button" class="btn btn--icon files-toggle" id="files-toggle" aria-expanded="false" aria-controls="files" aria-label="Show articles">☰</button>
+  <div class="top__brand"><strong id="site-name">Writer</strong><span>Writer · runs on this computer</span></div>
+  <div class="top__status" id="status" role="status" aria-live="polite">Loading…</div>
+  <div class="top__actions">
+    <button type="button" class="btn" id="btn-new">New article</button>
+    <button type="button" class="btn btn--primary" id="btn-save">Save</button>
+    <button type="button" class="btn" id="btn-download" disabled>Download .md</button>
+    <button type="button" class="btn" id="btn-build">Build site</button>
+    <button type="button" class="btn btn--danger" id="btn-delete" disabled>Delete</button>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="files" id="files" aria-label="Your articles">
+    <label class="sr-only" for="file-search">Filter articles</label>
+    <input id="file-search" type="search" placeholder="Filter articles…" autocomplete="off">
+    <ul id="file-list" class="files__list"></ul>
+    <p class="files__foot" id="files-foot"></p>
+  </aside>
+
+  <main class="work">
+    <form id="meta" class="meta" autocomplete="off" onsubmit="return false">
+      <div class="f f--title"><label for="f-title">Title <span class="count" id="c-title"></span></label><input id="f-title" required placeholder="A clear, specific headline"></div>
+      <div class="f"><label for="f-slug">Slug <small>(page address)</small></label><input id="f-slug" placeholder="made from the title"></div>
+      <div class="f"><label for="f-date">Date</label><input id="f-date" type="date"></div>
+      <div class="f"><label for="f-cat">Category</label><input id="f-cat" list="cats"><datalist id="cats"></datalist></div>
+      <div class="f"><label for="f-tags">Tags <small>(comma separated)</small></label><input id="f-tags" list="tag-list"><datalist id="tag-list"></datalist></div>
+      <div class="f f--wide"><label for="f-excerpt">Excerpt — shown in search results <span class="count" id="c-excerpt"></span></label><textarea id="f-excerpt" rows="2" placeholder="One or two sentences, about 120–160 characters, that make someone want to read on."></textarea></div>
+      <div class="f f--checks">
+        <label><input type="checkbox" id="f-featured"> Feature on the home page</label>
+        <label><input type="checkbox" id="f-draft"> Draft (hidden from the website)</label>
+      </div>
+    </form>
+
+    <div class="tabs" role="tablist" aria-label="Editor view">
+      <button type="button" role="tab" id="tab-write" aria-selected="true">Write</button>
+      <button type="button" role="tab" id="tab-preview" aria-selected="false">Preview</button>
+      <span class="tabs__info" id="info"></span>
+    </div>
+
+    <div class="toolbar" id="toolbar" role="toolbar" aria-label="Formatting">
+      <button type="button" data-act="h2" title="Heading">H2</button>
+      <button type="button" data-act="h3" title="Sub-heading">H3</button>
+      <button type="button" data-act="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+      <button type="button" data-act="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+      <button type="button" data-act="link" title="Link (Ctrl+K)">Link</button>
+      <button type="button" data-act="code" title="Inline code">&lt;/&gt;</button>
+      <button type="button" data-act="codeblock" title="Code block">Code block</button>
+      <button type="button" data-act="ul" title="Bullet list">• List</button>
+      <button type="button" data-act="ol" title="Numbered list">1. List</button>
+      <button type="button" data-act="quote" title="Quote">Quote</button>
+      <button type="button" data-act="table" title="Table">Table</button>
+      <button type="button" data-act="faq" title="Question &amp; answer (expandable)">FAQ</button>
+      <button type="button" data-act="image" title="Insert image (or paste / drop one)">Image</button>
+      <input type="file" id="img-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+    </div>
+
+    <div class="split" id="split" data-view="write">
+      <textarea id="f-body" class="editor" spellcheck="true" placeholder="Start writing in Markdown…&#10;&#10;## A heading&#10;Paste or drop an image straight in."></textarea>
+      <iframe id="preview" class="preview" title="Article preview" sandbox=""></iframe>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg"><h2 id="dlg-title"></h2><pre id="dlg-text"></pre><form method="dialog"><button class="btn btn--primary">Close</button></form></dialog>
+<script src="/app/app.js" defer></script>
+</body>
+</html>

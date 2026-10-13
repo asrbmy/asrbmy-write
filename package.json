@@ -1,0 +1,22 @@
+{
+  "name": "asrbmy-write",
+  "version": "1.0.0",
+  "description": "ASRBMY Write \u2014 a static writing and publishing site for GitHub Pages.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "check": "node scripts/check.js",
+    "dev": "node scripts/serve.js --watch",
+    "preview": "node scripts/serve.js",
+    "test": "npm run build && npm run check",
+    "write": "node writer/server.js"
+  },
+  "dependencies": {
+    "highlight.js": "^11.10.0",
+    "marked": "^14.1.2"
+  }
+}

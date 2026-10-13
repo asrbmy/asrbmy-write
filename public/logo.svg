@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="Notepad and pencil">
+  <rect x="7" y="6" width="22" height="28" rx="2" fill="#ecd29a"/>
+  <rect x="7" y="6" width="22" height="6" rx="2" fill="#c9a566"/>
+  <path d="M12 18h12M12 22.500h12M12 27h7" stroke="#0c302d" stroke-width="1.700" stroke-linecap="round"/>
+  <g transform="rotate(40 29 27)">
+    <rect x="26.500" y="12" width="5" height="17" fill="#d4562b"/>
+    <path d="M26.500 29h5l-2.500 5z" fill="#f4f0e3"/>
+    <rect x="26.500" y="9.500" width="5" height="3" fill="#a8a79a"/>
+  </g>
+</svg>

@@ -1,0 +1,218 @@
+// ASRBMY Writer — editor UI. Talks only to the local server in writer/server.js.
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const TOKEN = document.querySelector('meta[name="writer-token"]').content;
+  const el = {
+    status: $('status'), siteName: $('site-name'), list: $('file-list'), foot: $('files-foot'), filter: $('file-search'),
+    title: $('f-title'), slug: $('f-slug'), date: $('f-date'), cat: $('f-cat'), tags: $('f-tags'), excerpt: $('f-excerpt'),
+    featured: $('f-featured'), draft: $('f-draft'), body: $('f-body'), preview: $('preview'), info: $('info'),
+    cTitle: $('c-title'), cExcerpt: $('c-excerpt'), split: $('split'), files: $('files'),
+    save: $('btn-save'), del: $('btn-delete'), download: $('btn-download'),
+  };
+  let state = {}, list = [], cur = { file: null, extra: {} };
+  let dirty = false, saving = false, again = false, slugTouched = false, saveTimer, previewTimer;
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const slugify = (s) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+  const say = (msg, kind = '') => { el.status.textContent = msg; el.status.className = 'top__status' + (kind ? ` is-${kind}` : ''); };
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { ...opts, headers: { 'X-Writer-Token': TOKEN, ...(opts.headers || {}) } });
+    const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : await res.text();
+    if (!res.ok) throw new Error((data && data.error) || data || res.statusText);
+    return data;
+  }
+  const send = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  // ── Form <-> article ───────────────────────────────────────────────────────
+  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft'];
+  function collect() {
+    const title = el.title.value.trim();
+    return {
+      ...cur.extra, title, slug: el.slug.value.trim() || slugify(title), date: el.date.value, category: el.cat.value.trim() || state.defaultCategory,
+      tags: el.tags.value.split(',').map((t) => t.trim()).filter(Boolean), excerpt: el.excerpt.value.trim(),
+      featured: el.featured.checked, draft: el.draft.checked,
+    };
+  }
+  function fill(file, front, body) {
+    cur = { file, extra: Object.fromEntries(Object.entries(front).filter(([k]) => !EDITED.includes(k))) };
+    el.title.value = front.title || ''; el.slug.value = front.slug || ''; el.date.value = front.date || today();
+    el.cat.value = front.category || state.defaultCategory; el.tags.value = (front.tags || []).join(', ');
+    el.excerpt.value = front.excerpt || ''; el.featured.checked = front.featured === true; el.draft.checked = front.draft === true;
+    el.body.value = body || '';
+    slugTouched = !!file;
+    dirty = false; counters(); renderPreview(); buttons(); highlight();
+  }
+  function buttons() { el.del.disabled = el.download.disabled = !cur.file; }
+
+  function counters() {
+    const t = el.title.value.length, x = el.excerpt.value.length;
+    el.cTitle.textContent = t ? `${t}/60` : ''; el.cTitle.className = 'count ' + (t && t <= 60 ? 'ok' : t ? 'warn' : '');
+    el.cExcerpt.textContent = x ? `${x} (aim for 120–160)` : ''; el.cExcerpt.className = 'count ' + (x >= 120 && x <= 160 ? 'ok' : x ? 'warn' : '');
+  }
+
+  // ── Saving ─────────────────────────────────────────────────────────────────
+  async function save(manual = false) {
+    if (saving) { again = true; return false; }
+    const front = collect();
+    if (!front.title) { if (manual) say('Add a title first.', 'err'); return false; }
+    clearTimeout(saveTimer); saving = true; say('Saving…');
+    try {
+      const r = cur.file ? await send(`/api/articles/${encodeURIComponent(cur.file)}`, 'PUT', { front, body: el.body.value })
+        : await send('/api/articles', 'POST', { front, body: el.body.value });
+      cur.file = r.file; el.slug.value = r.slug; dirty = false;
+      say(`Saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${r.file}`, 'ok');
+      await refresh(); buttons();
+      return true;
+    } catch (e) { say(e.message, 'err'); return false; }
+    finally { saving = false; if (again) { again = false; save(); } }
+  }
+  function changed() {
+    dirty = true; counters(); say('Unsaved changes…');
+    clearTimeout(saveTimer);
+    if (state.autosaveSeconds > 0 && el.title.value.trim()) saveTimer = setTimeout(() => save(), state.autosaveSeconds * 1000);
+    clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 300);
+  }
+
+  // ── Article list ───────────────────────────────────────────────────────────
+  async function refresh() { list = await api('/api/articles'); drawList(); }
+  function drawList() {
+    const q = el.filter.value.trim().toLowerCase();
+    el.list.textContent = '';
+    for (const a of list.filter((x) => !q || `${x.title} ${x.category} ${x.tags.join(' ')}`.toLowerCase().includes(q))) {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.dataset.file = a.file;
+      b.innerHTML = `<strong>${esc(a.title)}${a.draft ? '<span class="chip">draft</span>' : ''}</strong><small>${esc(a.date)} · ${esc(a.category)} · ${a.words} word${a.words === 1 ? "" : "s"}</small>`;
+      b.addEventListener('click', () => openArticle(a.file));
+      li.append(b); el.list.append(li);
+    }
+    highlight();
+  }
+  function highlight() { el.list.querySelectorAll('button').forEach((b) => b.setAttribute('aria-current', String(b.dataset.file === cur.file))); }
+  async function openArticle(file) {
+    if (dirty) await save();
+    try { const a = await api(`/api/articles/${encodeURIComponent(file)}`); fill(file, a.front, a.body); say(`Opened ${file}`); el.files.classList.remove('is-open'); }
+    catch (e) { say(e.message, 'err'); }
+  }
+  async function newArticle() {
+    if (dirty) await save();
+    fill(null, { date: today(), category: state.defaultCategory }, '');
+    say('New article — start with a title.'); el.title.focus(); el.files.classList.remove('is-open');
+  }
+
+  // ── Preview (rendered with the website's own Markdown + CSS) ───────────────
+  async function renderPreview() {
+    try {
+      const r = await send('/api/preview', 'POST', { body: el.body.value });
+      const f = collect();
+      el.preview.srcdoc = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><link rel="stylesheet" href="/site/tokens.css"><link rel="stylesheet" href="/site/theme.css"><style>body{display:block;padding:16px;background:#e9e8d9}</style></head><body><article class="panel panel--top article"><header class="panel__head"><p class="kicker">${esc(f.category)}</p><h1 class="title">${esc(f.title || 'Untitled')}</h1>${f.excerpt ? `<p class="lede">${esc(f.excerpt)}</p>` : ''}</header><hr class="rule"><div class="prose">${r.html}</div></article></body></html>`;
+      el.info.textContent = `${r.words} words · ${r.readingTime} min read`;
+    } catch { /* preview is best-effort */ }
+  }
+
+  // ── Toolbar ────────────────────────────────────────────────────────────────
+  function insert(start, end, text, selFrom, selTo) {
+    el.body.focus(); el.body.setSelectionRange(start, end);
+    if (!document.execCommand('insertText', false, text)) el.body.setRangeText(text, start, end, 'end'); // execCommand keeps Ctrl+Z working
+    el.body.setSelectionRange(selFrom ?? start + text.length, selTo ?? selFrom ?? start + text.length);
+    changed();
+  }
+  function wrap(before, after, placeholder) {
+    const s = el.body.selectionStart, e = el.body.selectionEnd, t = el.body.value.slice(s, e) || placeholder;
+    insert(s, e, before + t + after, s + before.length, s + before.length + t.length);
+  }
+  function prefix(fn) {
+    const v = el.body.value, s = el.body.selectionStart, e = el.body.selectionEnd, ls = v.lastIndexOf('\n', s - 1) + 1;
+    const block = (v.slice(ls, e) || 'Item').split('\n').map((l, i) => fn(i) + l).join('\n');
+    insert(ls, e, block, ls + block.length);
+  }
+  const block = (text, selText) => {
+    const s = el.body.selectionStart, e = el.body.selectionEnd, pad = s > 0 && el.body.value[s - 1] !== '\n' ? '\n\n' : '';
+    const from = s + pad.length + text.indexOf(selText);
+    insert(s, e, pad + text, from, from + selText.length);
+  };
+  const ACTIONS = {
+    h2: () => prefix(() => '## '), h3: () => prefix(() => '### '),
+    bold: () => wrap('**', '**', 'bold text'), italic: () => wrap('*', '*', 'italic text'), code: () => wrap('`', '`', 'code'),
+    link: () => { const s = el.body.selectionStart, e = el.body.selectionEnd, t = el.body.value.slice(s, e) || 'link text'; insert(s, e, `[${t}](https://)`, s + t.length + 3, s + t.length + 11); },
+    codeblock: () => block('```js\ncode here\n```\n', 'code here'),
+    ul: () => prefix(() => '- '), ol: () => prefix((i) => `${i + 1}. `), quote: () => prefix(() => '> '),
+    table: () => block('| Column A | Column B |\n| --- | --- |\n| One | Two |\n', 'Column A'),
+    faq: () => block('<details class="faq">\n<summary>Question?</summary>\n\nAnswer.\n\n</details>\n', 'Question?'),
+    image: () => $('img-input').click(),
+  };
+  $('toolbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-act]'); if (b) ACTIONS[b.dataset.act](); });
+
+  async function uploadImage(file) {
+    say('Saving image…');
+    try {
+      const r = await api(`/api/images?name=${encodeURIComponent(file.name || 'image')}`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+      const alt = 'Describe the image', s = el.body.selectionStart;
+      insert(s, el.body.selectionEnd, `![${alt}](${r.url})`, s + 2, s + 2 + alt.length);
+      say(`Image saved as ${r.name} — upload it to your site's public/images folder too.`, 'ok');
+    } catch (e) { say(e.message, 'err'); }
+  }
+  $('img-input').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) uploadImage(f); e.target.value = ''; });
+  el.body.addEventListener('paste', (e) => { const f = [...e.clipboardData.files].find((x) => x.type.startsWith('image/')); if (f) { e.preventDefault(); uploadImage(f); } });
+  el.body.addEventListener('dragover', (e) => e.preventDefault());
+  el.body.addEventListener('drop', (e) => { const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/')); if (f) { e.preventDefault(); uploadImage(f); } });
+
+  // ── Wiring ─────────────────────────────────────────────────────────────────
+  el.title.addEventListener('input', () => { if (!slugTouched) el.slug.value = slugify(el.title.value); changed(); });
+  el.slug.addEventListener('input', () => { slugTouched = el.slug.value.trim() !== ''; changed(); });
+  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body']) el[k].addEventListener('input', changed);
+  el.filter.addEventListener('input', drawList);
+  el.save.addEventListener('click', () => save(true));
+  $('btn-new').addEventListener('click', newArticle);
+  $('files-toggle').addEventListener('click', (e) => { const o = el.files.classList.toggle('is-open'); e.currentTarget.setAttribute('aria-expanded', String(o)); });
+  for (const [id, view] of [['tab-write', 'write'], ['tab-preview', 'preview']]) {
+    $(id).addEventListener('click', () => { el.split.dataset.view = view; $('tab-write').setAttribute('aria-selected', String(view === 'write')); $('tab-preview').setAttribute('aria-selected', String(view === 'preview')); if (view === 'preview') renderPreview(); });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === 's') { e.preventDefault(); save(true); }
+    else if (document.activeElement === el.body && ACTIONS[{ b: 'bold', i: 'italic', k: 'link' }[k]]) { e.preventDefault(); ACTIONS[{ b: 'bold', i: 'italic', k: 'link' }[k]](); }
+  });
+  addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  $('btn-delete').addEventListener('click', async () => {
+    if (!cur.file || !confirm(`Move “${el.title.value}” to the Writer's trash folder?\n(You can recover it from writer/.trash.)`)) return;
+    try { await api(`/api/articles/${encodeURIComponent(cur.file)}`, { method: 'DELETE' }); dirty = false; await refresh(); fill(null, { date: today(), category: state.defaultCategory }, ''); say('Moved to trash.', 'ok'); }
+    catch (e) { say(e.message, 'err'); }
+  });
+  el.download.addEventListener('click', async () => {
+    if (dirty && !(await save(true))) return;
+    try {
+      const text = await api(`/api/articles/${encodeURIComponent(cur.file)}/raw`);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); a.download = cur.file;
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) { say(e.message, 'err'); }
+  });
+  $('btn-build').addEventListener('click', async () => {
+    if (dirty) await save();
+    say('Building the site…');
+    try {
+      const r = await send('/api/build', 'POST', {});
+      $('dlg-title').textContent = r.ok ? 'Build passed ✓' : 'Build failed';
+      $('dlg-text').textContent = r.output || '(no output)'; $('dlg').showModal();
+      say(r.ok ? 'Site built into dist/.' : 'Build failed — see details.', r.ok ? 'ok' : 'err');
+    } catch (e) { say(e.message, 'err'); }
+  });
+
+  // ── Start ──────────────────────────────────────────────────────────────────
+  (async () => {
+    try {
+      state = await api('/api/state');
+      document.title = `Writer · ${state.siteName}`; el.siteName.textContent = state.siteName;
+      $('cats').innerHTML = state.categories.map((c) => `<option value="${esc(c)}">`).join('');
+      $('tag-list').innerHTML = state.tags.map((c) => `<option value="${esc(c)}">`).join('');
+      el.foot.textContent = `Saved in: ${state.articlesDir}`;
+      await refresh();
+      fill(null, { date: today(), category: state.defaultCategory }, '');
+      say(`Ready. ${list.length} article${list.length === 1 ? '' : 's'} in your folder.`);
+    } catch (e) { say(e.message, 'err'); }
+  })();
+})();
