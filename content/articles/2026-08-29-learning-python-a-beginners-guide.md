@@ -5,6 +5,10 @@ date: 2026-08-29
 category: Tutorials
 tags: [python, tutorials, learning]
 excerpt: Variables, lists, loops and functions in one sitting, with small programs you can run and change.
+series: Developer Basics
+seriesOrder: 2
+cover: /images/cover-code.svg
+coverAlt: Abstract green and orange code brackets
 ---
 
 Python is a good first language because it reads almost like plain English. This guide covers the handful of ideas you will use in nearly every program.

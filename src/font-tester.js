@@ -7,6 +7,7 @@
   const families = JSON.parse(root.dataset.families);
   const current = JSON.parse(root.dataset.current);
   const $ = (id) => document.getElementById(id);
+  root.querySelector('form').addEventListener('submit', (e) => e.preventDefault());
   const el = {
     preset: $('ft-preset'), head: $('ft-head'), body: $('ft-body'), size: $('ft-size'), lead: $('ft-lead'),
     weight: $('ft-weight'), track: $('ft-track'), sample: $('ft-sample'), headText: $('ft-headtext'),

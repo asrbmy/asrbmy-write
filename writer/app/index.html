@@ -32,7 +32,7 @@
   </aside>
 
   <main class="work">
-    <form id="meta" class="meta" autocomplete="off" onsubmit="return false">
+    <form id="meta" class="meta" autocomplete="off">
       <div class="f f--title"><label for="f-title">Title <span class="count" id="c-title"></span></label><input id="f-title" required placeholder="A clear, specific headline"></div>
       <div class="f"><label for="f-slug">Slug <small>(page address)</small></label><input id="f-slug" placeholder="made from the title"></div>
       <div class="f"><label for="f-date">Date</label><input id="f-date" type="date"></div>
@@ -43,6 +43,17 @@
         <label><input type="checkbox" id="f-featured"> Feature on the home page</label>
         <label><input type="checkbox" id="f-draft"> Draft (hidden from the website)</label>
       </div>
+      <details class="f f--wide more">
+        <summary>More options: series, cover image, comments</summary>
+        <div class="more__grid">
+          <div class="f"><label for="f-series">Series <small>(group parts together)</small></label><input id="f-series" list="series-list"><datalist id="series-list"></datalist></div>
+          <div class="f"><label for="f-part">Part number</label><input id="f-part" type="number" min="1" step="1" inputmode="numeric"></div>
+          <div class="f"><label for="f-cover">Cover image <small>(e.g. /images/cover.jpg)</small></label><input id="f-cover" placeholder="/images/…"></div>
+          <div class="f"><label for="f-coveralt">Cover description <small>(for screen readers)</small></label><input id="f-coveralt"></div>
+          <div class="f f--checks f--inline"><label><input type="checkbox" id="f-comments" checked> Allow comments (when enabled on the site)</label></div>
+        </div>
+        <p class="more__hint">A date in the future schedules the article: it stays hidden until that day.</p>
+      </details>
     </form>
 
     <div class="tabs" role="tablist" aria-label="Editor view">

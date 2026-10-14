@@ -6,12 +6,13 @@
   const el = {
     status: $('status'), siteName: $('site-name'), list: $('file-list'), foot: $('files-foot'), filter: $('file-search'),
     title: $('f-title'), slug: $('f-slug'), date: $('f-date'), cat: $('f-cat'), tags: $('f-tags'), excerpt: $('f-excerpt'),
+    series: $('f-series'), part: $('f-part'), cover: $('f-cover'), coverAlt: $('f-coveralt'), comments: $('f-comments'),
     featured: $('f-featured'), draft: $('f-draft'), body: $('f-body'), preview: $('preview'), info: $('info'),
     cTitle: $('c-title'), cExcerpt: $('c-excerpt'), split: $('split'), files: $('files'),
     save: $('btn-save'), del: $('btn-delete'), download: $('btn-download'),
   };
   let state = {}, list = [], cur = { file: null, extra: {} };
-  let dirty = false, saving = false, again = false, slugTouched = false, saveTimer, previewTimer;
+  let dirty = false, slugTouched = false, saveTimer, previewTimer;
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const slugify = (s) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -27,13 +28,15 @@
   const send = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
   // ── Form <-> article ───────────────────────────────────────────────────────
-  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft'];
+  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments'];
   function collect() {
     const title = el.title.value.trim();
     return {
       ...cur.extra, title, slug: el.slug.value.trim() || slugify(title), date: el.date.value, category: el.cat.value.trim() || state.defaultCategory,
       tags: el.tags.value.split(',').map((t) => t.trim()).filter(Boolean), excerpt: el.excerpt.value.trim(),
       featured: el.featured.checked, draft: el.draft.checked,
+      series: el.series.value.trim(), seriesOrder: el.part.value ? Number(el.part.value) : '', cover: el.cover.value.trim(), coverAlt: el.coverAlt.value.trim(),
+      comments: el.comments.checked,
     };
   }
   function fill(file, front, body) {
@@ -41,6 +44,8 @@
     el.title.value = front.title || ''; el.slug.value = front.slug || ''; el.date.value = front.date || today();
     el.cat.value = front.category || state.defaultCategory; el.tags.value = (front.tags || []).join(', ');
     el.excerpt.value = front.excerpt || ''; el.featured.checked = front.featured === true; el.draft.checked = front.draft === true;
+    el.series.value = front.series || ''; el.part.value = front.seriesOrder || ''; el.cover.value = front.cover || ''; el.coverAlt.value = front.coverAlt || '';
+    el.comments.checked = front.comments !== false;
     el.body.value = body || '';
     slugTouched = !!file;
     dirty = false; counters(); renderPreview(); buttons(); highlight();
@@ -54,25 +59,38 @@
   }
 
   // ── Saving ─────────────────────────────────────────────────────────────────
+  let inflight = null, edits = 0;
   async function save(manual = false) {
-    if (saving) { again = true; return false; }
+    if (inflight) { await inflight.catch(() => {}); if (!dirty) return true; }
     const front = collect();
     if (!front.title) { if (manual) say('Add a title first.', 'err'); return false; }
-    clearTimeout(saveTimer); saving = true; say('Saving…');
-    try {
-      const r = cur.file ? await send(`/api/articles/${encodeURIComponent(cur.file)}`, 'PUT', { front, body: el.body.value })
-        : await send('/api/articles', 'POST', { front, body: el.body.value });
-      cur.file = r.file; el.slug.value = r.slug; dirty = false;
-      say(`Saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${r.file}`, 'ok');
-      await refresh(); buttons();
+    // A brand-new article is only created once it has a sensible title and some text (no files named "ab.md").
+    if (!cur.file && !manual && (front.title.length < 3 || !el.body.value.trim())) return false;
+    clearTimeout(saveTimer);
+    const target = cur, version = edits, body = el.body.value;
+    say('Saving…');
+    const run = (async () => {
+      const r = target.file ? await send(`/api/articles/${encodeURIComponent(target.file)}`, 'PUT', { front, body })
+        : await send('/api/articles', 'POST', { front, body });
+      target.file = r.file; // always the article that was saved, even if the user has since switched to another one
+      if (cur === target) {
+        el.slug.value = r.slug;
+        if (version === edits) dirty = false; // typed more while saving? stay dirty and save again
+        say(`Saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${r.file}`, 'ok');
+        buttons();
+      }
+      await refresh();
       return true;
-    } catch (e) { say(e.message, 'err'); return false; }
-    finally { saving = false; if (again) { again = false; save(); } }
+    })();
+    inflight = run;
+    try { const ok = await run; if (cur === target && dirty) setTimeout(() => save(), 0); return ok; }
+    catch (e) { say(e.message, 'err'); return false; }
+    finally { if (inflight === run) inflight = null; }
   }
   function changed() {
-    dirty = true; counters(); say('Unsaved changes…');
+    dirty = true; edits++; counters(); say('Unsaved changes…');
     clearTimeout(saveTimer);
-    if (state.autosaveSeconds > 0 && el.title.value.trim()) saveTimer = setTimeout(() => save(), state.autosaveSeconds * 1000);
+    if (state.autosaveSeconds > 0 && el.title.value.trim().length >= 3) saveTimer = setTimeout(() => save(), state.autosaveSeconds * 1000);
     clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 300);
   }
 
@@ -84,7 +102,7 @@
     for (const a of list.filter((x) => !q || `${x.title} ${x.category} ${x.tags.join(' ')}`.toLowerCase().includes(q))) {
       const li = document.createElement('li'), b = document.createElement('button');
       b.type = 'button'; b.dataset.file = a.file;
-      b.innerHTML = `<strong>${esc(a.title)}${a.draft ? '<span class="chip">draft</span>' : ''}</strong><small>${esc(a.date)} · ${esc(a.category)} · ${a.words} word${a.words === 1 ? "" : "s"}</small>`;
+      b.innerHTML = `<strong>${esc(a.title)}${a.draft ? '<span class="chip">draft</span>' : ''}${!a.draft && a.date > today() ? '<span class="chip">scheduled</span>' : ''}</strong><small>${esc(a.date)} · ${esc(a.category)} · ${a.words} word${a.words === 1 ? "" : "s"}</small>`;
       b.addEventListener('click', () => openArticle(a.file));
       li.append(b); el.list.append(li);
     }
@@ -92,20 +110,25 @@
   }
   function highlight() { el.list.querySelectorAll('button').forEach((b) => b.setAttribute('aria-current', String(b.dataset.file === cur.file))); }
   async function openArticle(file) {
+    if (inflight) await inflight.catch(() => {});
     if (dirty) await save();
     try { const a = await api(`/api/articles/${encodeURIComponent(file)}`); fill(file, a.front, a.body); say(`Opened ${file}`); el.files.classList.remove('is-open'); }
     catch (e) { say(e.message, 'err'); }
   }
   async function newArticle() {
+    if (inflight) await inflight.catch(() => {});
     if (dirty) await save();
     fill(null, { date: today(), category: state.defaultCategory }, '');
     say('New article — start with a title.'); el.title.focus(); el.files.classList.remove('is-open');
   }
 
   // ── Preview (rendered with the website's own Markdown + CSS) ───────────────
+  let previewSeq = 0;
   async function renderPreview() {
+    const seq = ++previewSeq;
     try {
       const r = await send('/api/preview', 'POST', { body: el.body.value });
+      if (seq !== previewSeq) return; // a newer preview is already on its way
       const f = collect();
       el.preview.srcdoc = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><link rel="stylesheet" href="/site/tokens.css"><link rel="stylesheet" href="/site/theme.css"><style>body{display:block;padding:16px;background:#e9e8d9}</style></head><body><article class="panel panel--top article"><header class="panel__head"><p class="kicker">${esc(f.category)}</p><h1 class="title">${esc(f.title || 'Untitled')}</h1>${f.excerpt ? `<p class="lede">${esc(f.excerpt)}</p>` : ''}</header><hr class="rule"><div class="prose">${r.html}</div></article></body></html>`;
       el.info.textContent = `${r.words} words · ${r.readingTime} min read`;
@@ -162,7 +185,8 @@
   // ── Wiring ─────────────────────────────────────────────────────────────────
   el.title.addEventListener('input', () => { if (!slugTouched) el.slug.value = slugify(el.title.value); changed(); });
   el.slug.addEventListener('input', () => { slugTouched = el.slug.value.trim() !== ''; changed(); });
-  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body']) el[k].addEventListener('input', changed);
+  $('meta').addEventListener('submit', (e) => e.preventDefault());
+  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body', 'series', 'part', 'cover', 'coverAlt', 'comments']) el[k].addEventListener('input', changed);
   el.filter.addEventListener('input', drawList);
   el.save.addEventListener('click', () => save(true));
   $('btn-new').addEventListener('click', newArticle);
@@ -208,6 +232,7 @@
       state = await api('/api/state');
       document.title = `Writer · ${state.siteName}`; el.siteName.textContent = state.siteName;
       $('cats').innerHTML = state.categories.map((c) => `<option value="${esc(c)}">`).join('');
+      $('series-list').innerHTML = (state.series || []).map((c) => `<option value="${esc(c)}">`).join('');
       $('tag-list').innerHTML = state.tags.map((c) => `<option value="${esc(c)}">`).join('');
       el.foot.textContent = `Saved in: ${state.articlesDir}`;
       await refresh();

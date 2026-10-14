@@ -9,7 +9,7 @@ A fast, static writing site for GitHub Pages. You write Markdown; a small Node s
 
 ## Run it locally
 
-Requires Node 18 or newer.
+Requires Node 20 or newer.
 
 ```bash
 npm install
@@ -23,7 +23,8 @@ Other commands:
 | --- | --- |
 | `npm run build` | Generates the site into `dist/` |
 | `npm run check` | Verifies every internal link, anchor and asset in `dist/` |
-| `npm test` | Build + check |
+| `npm test` | Security/regression tests, build and check |
+| `npm run test:unit` | Only the security and Markdown regression tests |
 | `npm run preview` | Serves an existing `dist/` without watching |
 | `npm run write` | Starts the Writer app on your computer |
 
@@ -91,11 +92,28 @@ Your article, in Markdown.
 | `subtitle` | no | Shown under the title instead of the excerpt |
 | `author` | no | Defaults to `author.name` |
 | `updated` | no | Shows an "Updated" date |
+| `series` | no | Name of a multi-part series. Articles with the same name are grouped, with a box listing every part and previous/next links. Pages: `/series/` and `/series/<name>/` |
+| `seriesOrder` | no | Part number (1, 2, 3…). Without it, parts are ordered by date, oldest first |
+| `cover` | no | Cover image: a file in `public/images` (`/images/cover.jpg`) or an `https://` address. Shown on cards and at the top of the article, and used as the share image |
+| `coverAlt` | no | Description of the cover for screen readers |
+| `comments` | no | `false` turns comments off for this article |
 | `featured` | no | `true` pins it in the home page and sidebar. The newest featured article wins |
 | `draft` | no | `true` hides it. Build with `INCLUDE_DRAFTS=1` to see drafts locally |
 | `readingTime` | no | Minutes. Calculated from the word count if omitted |
 
 Front matter values must fit on one line. Quote a value that starts with `[` or a quotation mark.
+
+### Scheduled posts
+
+Give an article a date in the future and it is left out of the site until that day. The deploy workflow also rebuilds the site every day (00:30 UTC), so a scheduled article goes live by itself. "Today" is measured in the time zone set as `timezone` in `site.config.js`. The Writer marks future-dated articles as *scheduled*. Build with `INCLUDE_DRAFTS=1` to preview them.
+
+### Comments (optional)
+
+Comments use [Giscus](https://giscus.app), which keeps them in your repository's GitHub Discussions (readers need a GitHub account). Turn on Discussions for the repository, install the Giscus app, copy the ids it shows into the `comments` block of `site.config.js`, and set `enabled: true`. Nothing is loaded from GitHub until a reader presses **Load comments**, so the site stays private by default. Use `comments: false` in an article to switch them off for that page.
+
+### Reading aids
+
+Article pages show a reading-progress bar. On wide screens an "On this page" list stays visible at the top of the sidebar and highlights the section you are reading; on phones the table of contents sits above the article.
 
 ### Edit or remove an article
 
@@ -168,6 +186,14 @@ writer/                 the Writer app (runs on your PC, not part of the website
 scripts/                build.js, markdown.js, templates.js, tokens.js, check.js, serve.js
 dist/                   generated output (not committed)
 ```
+
+## Security
+
+- **No scripts from authors.** Raw HTML in articles goes through an allow-list: `<script>`, `<iframe>`, forms, inline styles, `on…` handlers and `javascript:` / `data:` links are removed or shown as text.
+- **Content-Security-Policy** on every page allows only the site's own scripts and styles. To embed something external (a video), add its address to `security.extra` in `site.config.js`.
+- **Writer app** listens on `127.0.0.1` only, needs a random per-run token, rejects foreign Host headers, writes files atomically and checks that uploaded images really are images.
+- **Dev server** (`npm run dev`) is local-only by default and answers malformed URLs safely; set `HOST=0.0.0.0` to share it on your network.
+- `npm audit` reports no known vulnerabilities in the two dependencies.
 
 ## Notes
 

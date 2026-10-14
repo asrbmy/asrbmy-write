@@ -17,13 +17,15 @@ const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e
 const htmlFiles = walk(DIST).filter((f) => f.endsWith('.html'));
 
 const exists = (urlPath) => {
-  let p = decodeURIComponent(urlPath);
+  let p;
+  try { p = decodeURIComponent(urlPath); } catch { return false; }
   const full = path.join(DIST, p);
   if (fs.existsSync(full) && fs.statSync(full).isFile()) return true;
   return fs.existsSync(path.join(full, 'index.html'));
 };
 
 const problems = [];
+if (process.env.GITHUB_ACTIONS && /YOUR-USERNAME/.test(fs.readFileSync(path.join(DIST, 'sitemap.xml'), 'utf8'))) problems.push('sitemap.xml: site url still contains YOUR-USERNAME (set url in site.config.js)');
 const ids = new Map();
 const idsOf = (file) => {
   if (!ids.has(file)) ids.set(file, new Set([...fs.readFileSync(file, 'utf8').matchAll(/\sid="([^"]+)"/g)].map((m) => m[1])));
@@ -33,7 +35,10 @@ const idsOf = (file) => {
 for (const file of htmlFiles) {
   const html = fs.readFileSync(file, 'utf8');
   const rel = path.relative(DIST, file);
-  if (html.includes('{{')) problems.push(`${rel}: unreplaced {{placeholder}}`);
+  const prose = html.replace(/<pre[\s\S]*?<\/pre>/g, '').replace(/<code[\s\S]*?<\/code>/g, '');
+  if (/\{\{\s*[\w.]+\s*\}\}/.test(prose)) problems.push(`${rel}: unreplaced {{placeholder}}`);
+  if (/\son[a-z]+\s*=\s*["']/i.test(prose.replace(/<script[\s\S]*?<\/script>/g, ''))) problems.push(`${rel}: inline event handler (blocked by the Content-Security-Policy)`);
+  if ((html.match(/<a\s[^>]*>/g) || []).some((t) => /target="_blank"/.test(t) && !/rel="[^"]*noopener/.test(t))) problems.push(`${rel}: target=_blank link without rel=noopener`);
   if (!/<title>[^<]+<\/title>/.test(html)) problems.push(`${rel}: missing <title>`);
   if ((html.match(/<h1[\s>]/g) || []).length !== 1) problems.push(`${rel}: expected exactly one <h1>`);
   // SEO basics

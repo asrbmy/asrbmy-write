@@ -10,12 +10,14 @@ export default {
   tagline: 'Notes, Research & Ideas',
   description: 'A personal space for writing, research, ideas, and technical notes.',
   language: 'en',
+  // Time zone used to decide when a scheduled article (one dated in the future) goes live.
+  timezone: 'Asia/Kolkata',
 
   // ── Hosting ────────────────────────────────────────────────────────────────
   // On GitHub Actions, `url` and `base` are detected automatically from the
   // repository name. Set them here only for a custom domain or local overrides.
-  url: 'https://asrbmy.github.io',
-  base: '/Write', // '' for user sites / custom domains, '/repo-name' for project sites
+  url: 'https://YOUR-USERNAME.github.io',
+  base: '', // '' for user sites / custom domains, '/repo-name' for project sites
 
   // GitHub repository ("owner/repo"). Used to fill in the GitHub social link.
   // Detected automatically on GitHub Actions.
@@ -149,11 +151,26 @@ export default {
     headingWeight: 800, // 400–900
   },
 
+  // ── Security ───────────────────────────────────────────────────────────────
+  // Every page carries a Content-Security-Policy that only allows this site's own
+  // scripts and styles. Images may come from this site or any https:// address.
+  // Embedding something external (a video, a widget)? Add its address to `extra`,
+  // for example: "frame-src https://www.youtube-nocookie.com".
+  security: { csp: true, imgSrc: "'self' data: https:", extra: '' },
+
+  // ── Comments (optional) ────────────────────────────────────────────────────
+  // Uses Giscus, which stores comments in your repository's GitHub Discussions.
+  // 1. Turn on Discussions in the repo (Settings → General → Features).
+  // 2. Install the Giscus app on the repo, then open https://giscus.app, enter the repo,
+  //    and copy the ids it shows (repoId, categoryId) here. 3. Set enabled: true.
+  // Visitors need a GitHub account to comment. Nothing loads until they press "Load comments".
+  comments: { enabled: false, repo: '', repoId: '', category: 'Announcements', categoryId: '', mapping: 'pathname', reactions: true },
+
   // ── Search & social sharing ────────────────────────────────────────────────
   seo: {
     ogImage: '/og-default.png', // 1200×630, in /public. Used when a page has no image of its own.
     locale: 'en_US',
-    twitter: '@asrbmy', // e.g. '@yourhandle' (optional)
+    twitter: '', // e.g. '@yourhandle' (optional)
   },
 
   // ── Design tokens ──────────────────────────────────────────────────────────

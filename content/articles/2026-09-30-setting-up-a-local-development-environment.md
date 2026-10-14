@@ -5,6 +5,10 @@ date: 2026-09-30
 category: Programming
 tags: [tooling, setup, programming]
 excerpt: A small, repeatable setup beats a clever one. Here is how I get a new machine ready for development without losing an afternoon.
+series: Developer Basics
+seriesOrder: 1
+cover: /images/cover-setup.svg
+coverAlt: Abstract terminal window
 ---
 
 A new laptop or a fresh clone should not take a day to become useful. The trick is to keep the setup small, write it down, and make it easy to check.

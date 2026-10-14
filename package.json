@@ -5,15 +5,16 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "node scripts/build.js",
     "check": "node scripts/check.js",
     "dev": "node scripts/serve.js --watch",
     "preview": "node scripts/serve.js",
-    "test": "npm run build && npm run check",
-    "write": "node writer/server.js"
+    "test": "npm run test:unit && npm run build && npm run check",
+    "write": "node writer/server.js",
+    "test:unit": "node tests/regression.mjs"
   },
   "dependencies": {
     "highlight.js": "^11.10.0",

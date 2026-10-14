@@ -1,9 +1,10 @@
 // ASRBMY Write — static site builder.
 //   content/articles/*.md  →  dist/articles/<slug>/index.html (+ indexes, feeds, search index)
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseFrontmatter, renderMarkdown, htmlToText, esc, slugify } from './markdown.js';
+import { parseFrontmatter, renderMarkdown, htmlToText, esc, slugify, cleanUrl } from './markdown.js';
 import { createTemplates, icon } from './templates.js';
 import { tokensCss, resolveTypography } from './tokens.js';
 import { fontPresets, fontFamilies } from '../fonts.config.js';
@@ -25,6 +26,7 @@ const cleanBase = (b = '') => {
 let base = cleanBase(process.env.BASE_PATH ?? (ghRepo && !process.env.BASE_PATH ? (isUserSite ? '' : `/${ghName}`) : C.base));
 let siteUrl = (process.env.SITE_URL || (ghOwner ? `https://${ghOwner.toLowerCase()}.github.io` : C.url) || '').replace(/\/+$/, '');
 const repo = process.env.SITE_REPO || ghRepo || C.repo || '';
+if (/YOUR-USERNAME/.test(siteUrl) && !process.env.QUIET) console.warn('! site.config.js still has the placeholder url. Search-engine links use it; on GitHub Actions it is detected automatically. For a custom domain, set url in site.config.js.');
 
 const u = (p) => base + p;
 const abs = (p) => siteUrl + p;
@@ -36,18 +38,38 @@ const defaults = { author: C.author?.name, category: 'Notes', featured: false, .
 const includeDrafts = !!process.env.INCLUDE_DRAFTS;
 const fail = (msg) => { console.error(`\n✖ ${msg}\n`); process.exit(1); };
 
+const validDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
 const articleDir = path.join(ROOT, 'content/articles');
+fs.mkdirSync(articleDir, { recursive: true });
+// "Today" in the site's own time zone, so a post dated today appears at the start of that day.
+const zone = (() => { try { new Intl.DateTimeFormat('en', { timeZone: C.timezone || 'UTC' }); return C.timezone || 'UTC'; } catch { fail(`site.config.js: timezone "${C.timezone}" is not a valid time zone name (try "UTC" or "Asia/Kolkata")`); } })();
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const scheduled = [];
+// A cover image is a file in public/images ("images/pic.jpg" or "/images/pic.jpg") or an https:// address.
+function coverPath(v, where) {
+  if (!v) return '';
+  const raw = cleanUrl(String(v));
+  if (raw === null) fail(`${where}: "cover" must be an image path or https:// address`);
+  if (/^https:\/\//i.test(raw)) return raw;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) fail(`${where}: "cover" must be a path such as /images/photo.jpg or an https:// address`);
+  return '/' + raw.replace(/^(?:\.{0,2}\/)*(?:public\/)?/, '');
+}
 const articles = [];
-for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md')).sort()) {
+for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') && !f.startsWith('.')).sort()) {
   const src = fs.readFileSync(path.join(articleDir, file), 'utf8');
   const { data: fm, body } = parseFrontmatter(src);
   const where = `content/articles/${file}`;
   if (fm.draft === true && !includeDrafts) continue;
   if (!fm.title) fail(`${where}: missing "title" in front matter`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fm.date || ''))) fail(`${where}: "date" must look like 2025-04-26`);
+  if (!validDate(String(fm.date || ''))) fail(`${where}: "date" must be a real date written like 2026-04-26 (got "${fm.date ?? ''}")`);
+  if (fm.updated && !validDate(String(fm.updated))) fail(`${where}: "updated" must be a real date written like 2026-04-26`);
+  if (String(fm.date) > today && !includeDrafts) { scheduled.push(`${fm.date}  ${fm.title}`); continue; } // scheduled: goes live on its date
   const slug = slugify(fm.slug || file.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, ''));
-  const category = String(fm.category || defaults.category);
-  const tags = Array.isArray(fm.tags) ? fm.tags : fm.tags ? [fm.tags] : [];
+  if (!slug) fail(`${where}: could not make a URL slug — add a "slug:" using letters or numbers`);
+  const category = String(fm.category || defaults.category).trim();
+  if (!slugify(category)) fail(`${where}: category "${category}" needs at least one letter or number`);
+  const rawTags = Array.isArray(fm.tags) ? fm.tags : String(fm.tags || '').split(',');
+  const tags = [...new Set(rawTags.map((t) => String(t).trim()).filter((t) => slugify(t)))];
   const { html, toc } = renderMarkdown(body, { base });
   const text = htmlToText(html);
   const firstPara = htmlToText((html.match(/<p>([\s\S]*?)<\/p>/) || [, ''])[1]);
@@ -57,6 +79,9 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md')).s
     date: String(fm.date), updated: fm.updated ? String(fm.updated) : '',
     author: String(fm.author || defaults.author), category, tags, featured: fm.featured === true,
     excerpt, html, toc, text,
+    cover: coverPath(fm.cover, where), coverAlt: fm.coverAlt ? String(fm.coverAlt) : '',
+    series: fm.series ? String(fm.series).trim() : '', seriesOrder: fm.seriesOrder !== undefined && fm.seriesOrder !== '' && Number.isFinite(Number(fm.seriesOrder)) ? Number(fm.seriesOrder) : null,
+    comments: fm.comments !== false,
     readingTime: Number(fm.readingTime) || Math.max(1, Math.round(text.split(/\s+/).length / 220)),
   });
 }
@@ -72,7 +97,17 @@ const catSlug = (n) => slugify(n);
 const tagSlug = (n) => slugify(n);
 const catMap = new Map();
 const tagMap = new Map();
+const nameFor = (map, key, name, kind) => {
+  const seen = map.get(key);
+  if (seen && seen.toLowerCase() !== name.toLowerCase()) fail(`The ${kind}s "${seen}" and "${name}" would share the address "${key}". Rename one of them.`);
+  if (!seen) map.set(key, name);
+  return map.get(key);
+};
+const catNames = new Map();
+const tagNames = new Map();
 for (const a of articles) {
+  a.category = nameFor(catNames, catSlug(a.category), a.category, 'category');
+  a.tags = [...new Set(a.tags.map((t) => nameFor(tagNames, tagSlug(t), t, 'tag')))];
   if (!catMap.has(a.category)) catMap.set(a.category, []);
   catMap.get(a.category).push(a);
   for (const t of a.tags) {
@@ -86,6 +121,42 @@ const categories = [...catMap.entries()]
   .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 const tags = [...tagMap.values()].map((t) => ({ ...t, count: t.articles.length })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
+// ── Series ───────────────────────────────────────────────────────────────────
+// Articles that share a `series:` name are grouped, ordered by `seriesOrder` (else by date, oldest first).
+const seriesNames = new Map();
+const seriesMap = new Map();
+for (const a of articles) {
+  if (!a.series) continue;
+  const key = slugify(a.series);
+  if (!key) fail(`content/articles/${a.file}: series "${a.series}" needs at least one letter or number`);
+  a.series = nameFor(seriesNames, key, a.series, 'series');
+  if (!seriesMap.has(key)) seriesMap.set(key, { name: a.series, slug: key, parts: [] });
+  seriesMap.get(key).parts.push(a);
+}
+const seriesList = [...seriesMap.values()].map((sr) => {
+  sr.parts.sort((x, y) => (x.seriesOrder ?? Infinity) - (y.seriesOrder ?? Infinity) || x.date.localeCompare(y.date) || x.title.localeCompare(y.title));
+  sr.parts.forEach((a, i) => { a.seriesInfo = { ...sr, index: i }; });
+  return sr;
+}).sort((x, y) => x.name.localeCompare(y.name));
+
+// Does a configured link point at something that exists? (hides nav items for empty categories)
+const hasRoute = (href) => {
+  let m;
+  if ((m = href.match(/^\/categories\/([^/]+)\/?$/))) return categories.some((c) => c.slug === m[1]);
+  if ((m = href.match(/^\/tags\/([^/]+)\/?$/))) return tags.some((t) => t.slug === m[1]);
+  return true;
+};
+
+// ── Cache-busting versions for assets ────────────────────────────────────────
+const sha = (x) => crypto.createHash('sha1').update(x).digest('hex').slice(0, 8);
+const assetVer = {
+  'tokens.css': sha(tokensCss(C)),
+  ...Object.fromEntries(['theme.css', 'site.js', 'font-tester.js', 'comments.js'].map((f) => [f, sha(fs.readFileSync(path.join(ROOT, 'src', f)))])),
+};
+const asset = (name) => `${u(`/assets/${name}`)}?v=${assetVer[name]}`;
+const searchIndexJson = JSON.stringify(articles.map((a) => ({ t: a.title, u: u(a.url), c: a.category, g: a.tags, e: a.excerpt, d: a.date, r: a.readingTime, x: a.text })));
+const searchUrl = `${u('/search-index.json')}?v=${sha(searchIndexJson)}`;
+
 // ── Social links ─────────────────────────────────────────────────────────────
 const social = (C.social || [])
   .map((s) => ({ ...s, href: s.href || (s.icon === 'github' && repo ? `https://github.com/${repo}` : '') }))
@@ -96,15 +167,19 @@ const socialForTemplate = (C.social || [])
   .map((s) => ({ ...s, href: s.href || (s.icon === 'github' && repo ? `https://github.com/${repo}` : '') }))
   .filter((s) => s.href);
 
-const S = { config: C, base, siteUrl, u, abs, fmtDate, articles, categories, tags, catSlug, tagSlug, social: socialForTemplate };
+const imgSrc = (c) => (/^https:/i.test(c) ? c : u(c));
+const S = { imgSrc, seriesList, config: C, base, siteUrl, u, abs, asset, fmtDate, articles, categories, tags, catSlug, tagSlug, hasRoute, social: socialForTemplate };
 const T = createTemplates(S);
 
 // ── Output helpers ───────────────────────────────────────────────────────────
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 const emitted = [];
+const written = new Set();
 function emit(sitePath, content, { sitemap = true } = {}) {
   const file = sitePath.endsWith('/') ? `${sitePath}index.html` : sitePath;
+  if (written.has(file)) fail(`Two pages want the same address (${sitePath}). Rename the page in content/pages or the article slug.`);
+  written.add(file);
   const out = path.join(DIST, file);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, content);
@@ -124,10 +199,10 @@ const homeCrumb = { label: 'Home', href: '/' };
   <p class="lede">${esc(C.description)}</p>
   <ul class="chips" aria-label="Browse by topic">${categories.map((c) => `<li><a href="${u(`/categories/${c.slug}/`)}">${esc(c.name)} <span>${c.count}</span></a></li>`).join('')}</ul>
 </section>
-${featured ? `<section class="panel panel--top block" aria-labelledby="h-featured"><h2 class="block__title" id="h-featured">Featured</h2>${T.articleCard(featured, { featured: true })}</section>` : ''}
+${featured ? `<section class="panel panel--top block" aria-labelledby="h-featured"><h2 class="block__title" id="h-featured">Featured</h2>${T.articleCard(featured, { featured: true, level: 3 })}</section>` : ''}
 <section class="panel panel--top block" aria-labelledby="h-latest">
   <h2 class="block__title" id="h-latest">Latest writing</h2>
-  <div class="cards">${latest.map((a) => T.articleCard(a)).join('')}</div>
+  <div class="cards">${latest.map((a) => T.articleCard(a, { level: 3 })).join('')}</div>
   <p class="more"><a href="${u('/writing/')}">All articles ${icon('arrow', 14)}</a></p>
 </section>`;
   emit('/', T.page({ title: `${C.name} — ${C.tagline}`, path: u('/'), body, description: C.description, noSuffix: true,
@@ -210,7 +285,7 @@ ${[...byYear.entries()].map(([y, list]) => `<section class="archive__year" aria-
 {
   const body = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Find an article', title: 'Search', lede: 'Searches titles, excerpts, categories, tags and the full text.' })}
-<div id="search-app" data-index="${u('/search-index.json')}">
+<div id="search-app" data-index="${esc(searchUrl)}">
   <form class="search-form" role="search" action="${u('/search/')}" method="get">
     <label class="sr-only" for="q">Search</label>
     <input id="q" name="q" type="search" placeholder="Search articles…" autocomplete="off" autofocus>
@@ -222,9 +297,7 @@ ${panelHead({ kicker: 'Find an article', title: 'Search', lede: 'Searches titles
 </div>
 </section>`;
   emit('/search/', T.page({ title: 'Search', path: u('/search/'), body, crumbs: [homeCrumb, { label: 'Search' }], description: `Search ${C.name}.`, noindex: true }), { sitemap: false });
-  fs.writeFileSync(path.join(DIST, 'search-index.json'), JSON.stringify(articles.map((a) => ({
-    t: a.title, u: u(a.url), c: a.category, g: a.tags, e: a.excerpt, d: a.date, r: a.readingTime, x: a.text,
-  }))));
+  fs.writeFileSync(path.join(DIST, 'search-index.json'), searchIndexJson);
 }
 
 // ── Static pages from content/pages ──────────────────────────────────────────
@@ -233,6 +306,7 @@ const pagesDir = path.join(ROOT, 'content/pages');
 for (const file of fs.existsSync(pagesDir) ? fs.readdirSync(pagesDir).filter((f) => f.endsWith('.md')) : []) {
   const { data: fm, body: md } = parseFrontmatter(fs.readFileSync(path.join(pagesDir, file), 'utf8'));
   const slug = slugify(fm.slug || file.replace(/\.md$/, ''));
+  if (!slug) fail(`content/pages/${file}: could not make a URL slug`);
   const sub = (v) => String(v ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in pageVars ? pageVars[k] : m));
   const { html } = renderMarkdown(md, { base, vars: pageVars });
   const body = `<article class="panel panel--top">
@@ -263,7 +337,7 @@ ${rows.length ? `<ul class="contact">${rows.join('')}</ul>` : `<p>No contact det
   const body = `<section class="panel panel--top fonttester" id="fonttester"
   data-presets="${esc(JSON.stringify(fontPresets))}" data-families="${esc(JSON.stringify(fontFamilies))}" data-current="${esc(JSON.stringify(current))}">
 ${panelHead({ kicker: 'Typography', title: 'Font Tester', lede: 'Try heading and body fonts, text size and line spacing. Copy the result into site.config.js to restyle every article.' })}
-<form class="ft__controls" onsubmit="return false">
+<form class="ft__controls">
   <div class="field"><label for="ft-preset">Preset</label><select id="ft-preset"></select></div>
   <div class="field"><label for="ft-head">Heading font</label><select id="ft-head"></select></div>
   <div class="field"><label for="ft-body">Body font</label><select id="ft-body"></select></div>
@@ -288,7 +362,7 @@ ${panelHead({ kicker: 'Typography', title: 'Font Tester', lede: 'Try heading and
 <p class="ft__hint">Only fonts already installed on a device can be shown, so a font marked “not on this device” falls back to the next one in its list. That is why the site uses system fonts: nothing to download, nothing sent to a font service, and the page loads fast.</p>
 </section>`;
   emit('/font-tester/', T.page({ title: 'Font Tester', path: u('/font-tester/'), body, wide: true, crumbs: [homeCrumb, { label: 'Font Tester' }],
-    description: 'Preview heading and body fonts, text size and line spacing for the writing on this site.', scripts: ['/assets/font-tester.js'] }));
+    description: 'Preview heading and body fonts, text size and line spacing for the writing on this site.', scripts: ['font-tester.js'] }));
 }
 
 // ── Articles ─────────────────────────────────────────────────────────────────
@@ -305,12 +379,28 @@ articles.forEach((a, i) => {
   const newer = articles[i - 1];
   const older = articles[i + 1];
   const rel = related(a);
+  const si = a.seriesInfo;
+  const series = si ? `<details class="series" id="series-box" open>
+    <summary><span class="series__label">Series · Part ${si.index + 1} of ${si.parts.length}</span><a class="series__name" href="${u(`/series/${si.slug}/`)}">${esc(si.name)}</a></summary>
+    <ol class="series__list">${si.parts.map((p, i) => i === si.index ? `<li aria-current="page"><span>${esc(p.title)}</span></li>` : `<li><a href="${u(p.url)}">${esc(p.title)}</a></li>`).join('')}</ol>
+    <p class="series__nav">${si.parts[si.index - 1] ? `<a rel="prev" href="${u(si.parts[si.index - 1].url)}">← Previous part</a>` : '<span></span>'}${si.parts[si.index + 1] ? `<a rel="next" href="${u(si.parts[si.index + 1].url)}">Next part →</a>` : ''}</p>
+  </details>` : '';
+  const cm = C.comments || {};
+  const commentsOn = cm.enabled === true && cm.repo && cm.repoId && cm.categoryId && a.comments;
+  const comments = commentsOn ? `<section class="comments" id="comments" aria-labelledby="h-comments">
+    <h2 id="h-comments">Discussion</h2>
+    <p>Comments are GitHub Discussions. Nothing is loaded from GitHub until you choose to.</p>
+    <button type="button" class="btn" id="load-comments" data-repo="${esc(cm.repo)}" data-repo-id="${esc(cm.repoId)}" data-category="${esc(cm.category || '')}" data-category-id="${esc(cm.categoryId)}" data-mapping="${esc(cm.mapping || 'pathname')}" data-lang="${esc(cm.lang || C.language || 'en')}" data-reactions="${cm.reactions === false ? '0' : '1'}">Load comments</button>
+    <div id="giscus-box"></div>
+  </section>` : '';
+  const sideToc = a.toc.length >= 3 ? `<nav class="side-toc" id="toc-side" aria-labelledby="h-toc-side"><h2 class="side-title" id="h-toc-side">On this page</h2><ol>${a.toc.map((h) => `<li class="toc__d${h.depth}"><a href="#${h.id}">${esc(h.text)}</a></li>`).join('')}</ol></nav>` : '';
   const toc = a.toc.length >= 3
     ? `<details class="toc" open><summary>Table of Contents</summary><ol class="toc__list">${a.toc.map((h) => `<li class="toc__d${h.depth}"><a href="#${h.id}">${esc(h.text)}</a></li>`).join('')}</ol></details>` : '';
   const body = `<article class="panel panel--top article">
   <header class="panel__head">
     <p class="kicker">${T.catLink(a.category)}</p>
     <h1 class="title">${esc(a.title)}</h1>
+    ${a.cover ? `<figure class="cover"><img src="${esc(S.imgSrc(a.cover))}" alt="${esc(a.coverAlt)}" width="1200" height="630" decoding="async" fetchpriority="high"></figure>` : ''}
     ${a.subtitle || a.excerpt ? `<p class="lede">${esc(a.subtitle || a.excerpt)}</p>` : ''}
     <div class="byline">
       <span class="byline__item">${esc(a.author)}</span>
@@ -321,8 +411,10 @@ articles.forEach((a, i) => {
     </div>
   </header>
   <hr class="rule">
+  ${series}
   ${toc}
   <div class="prose">${a.html}</div>
+  ${comments}
   ${rel.length ? `<aside class="related" aria-labelledby="h-related"><h2 id="h-related">Related Articles</h2><ul>${rel.map((r) => `<li><a href="${u(r.url)}">${esc(r.title)}</a><span>${esc(r.category)} · ${r.readingTime} min read</span></li>`).join('')}</ul></aside>` : ''}
   <nav class="prevnext" aria-label="More articles">
     ${older ? `<a class="prevnext__item" rel="prev" href="${u(older.url)}"><small>← Older</small><span>${esc(older.title)}</span></a>` : '<span></span>'}
@@ -330,18 +422,37 @@ articles.forEach((a, i) => {
   </nav>
 </article>`;
   emit(a.url, T.page({
-    title: a.title, path: u(a.url), body, description: a.excerpt, bodyClass: 'is-article',
+    title: a.title, path: u(a.url), body, description: a.excerpt, bodyClass: `is-article${sideToc ? ' has-side-toc' : ''}`,
+    progress: true, sideExtra: sideToc, ogImage: a.cover || undefined, scripts: commentsOn ? ['comments.js'] : [],
     article: { published: a.date, modified: a.updated || a.date, section: a.category, tags: a.tags },
     crumbs: [homeCrumb, { label: 'Writing', href: '/writing/' }, { label: a.title }],
     jsonld: {
       '@context': 'https://schema.org', '@type': 'BlogPosting', headline: a.title, description: a.excerpt,
       datePublished: a.date, dateModified: a.updated || a.date, author: { '@type': 'Person', name: a.author },
       mainEntityOfPage: { '@type': 'WebPage', '@id': abs(u(a.url)) }, keywords: a.tags.join(', '), articleSection: a.category,
-      wordCount: a.text.split(/\s+/).length, inLanguage: C.language, image: abs(u(C.seo?.ogImage || '/og-default.png')),
+      wordCount: a.text.split(/\s+/).length, inLanguage: C.language, image: a.cover ? abs(S.imgSrc(a.cover)) : abs(u(C.seo?.ogImage || '/og-default.png')),
+      ...(si ? { isPartOf: { '@type': 'CreativeWorkSeries', name: si.name, url: abs(u(`/series/${si.slug}/`)) }, position: si.index + 1 } : {}),
       publisher: { '@type': 'Organization', name: C.name, logo: { '@type': 'ImageObject', url: abs(u('/icon-512.png')) } },
     },
   }));
 });
+
+// ── Series pages ─────────────────────────────────────────────────────────────
+if (seriesList.length) {
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Multi-part writing', title: 'Series', lede: 'Articles that belong together, in reading order.' })}
+<ul class="catgrid">${seriesList.map((sr) => `<li><a href="${u(`/series/${sr.slug}/`)}"><span class="catgrid__name">${esc(sr.name)}</span><span class="count">${sr.parts.length}</span><span class="catgrid__desc">${sr.parts.length} part${sr.parts.length === 1 ? '' : 's'}</span></a></li>`).join('')}</ul>
+</section>`;
+  emit('/series/', T.page({ title: 'Series', path: u('/series/'), body, crumbs: [homeCrumb, { label: 'Series' }], description: `Multi-part series on ${C.name}.` }));
+  for (const sr of seriesList) {
+    const b = `<section class="panel panel--top">
+${panelHead({ kicker: 'Series', title: sr.name, lede: `${sr.parts.length} part${sr.parts.length === 1 ? '' : 's'}, in reading order.` })}
+<ol class="series-parts">${sr.parts.map((p, i) => `<li><span class="series-parts__n" aria-hidden="true">${i + 1}</span>${T.articleCard(p, { level: 2 })}</li>`).join('')}</ol>
+</section>`;
+    emit(`/series/${sr.slug}/`, T.page({ title: `${sr.name} (series)`, path: u(`/series/${sr.slug}/`), body: b,
+      crumbs: [homeCrumb, { label: 'Series', href: '/series/' }, { label: sr.name }], description: `All ${sr.parts.length} parts of the ${sr.name} series.` }));
+  }
+}
 
 // ── 404 ──────────────────────────────────────────────────────────────────────
 emit('/404.html', T.page({
@@ -356,22 +467,24 @@ ${panelHead({ kicker: 'Error 404', title: 'Page not found', lede: 'That page doe
 // ── Feeds ────────────────────────────────────────────────────────────────────
 {
   const rfc = (d) => new Date(`${d}T00:00:00Z`).toUTCString();
+  const xml = (v) => esc(String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ''));
   const items = articles.slice(0, 30).map((a) => `    <item>
-      <title>${esc(a.title)}</title>
-      <link>${esc(abs(u(a.url)))}</link>
-      <guid isPermaLink="true">${esc(abs(u(a.url)))}</guid>
+      <title>${xml(a.title)}</title>
+      <link>${xml(abs(u(a.url)))}</link>
+      <guid isPermaLink="true">${xml(abs(u(a.url)))}</guid>
       <pubDate>${rfc(a.date)}</pubDate>
-      <category>${esc(a.category)}</category>
-      <description>${esc(a.excerpt)}</description>
+      <category>${xml(a.category)}</category>
+      <description>${xml(a.excerpt)}</description>
     </item>`).join('\n');
   fs.writeFileSync(path.join(DIST, 'rss.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>${esc(C.name)}</title>
-    <link>${esc(abs(u('/')))}</link>
-    <description>${esc(C.description)}</description>
-    <language>${esc(C.language)}</language>
-    <atom:link href="${esc(abs(u('/rss.xml')))}" rel="self" type="application/rss+xml"/>
+    <title>${xml(C.name)}</title>
+    <link>${xml(abs(u('/')))}</link>
+    <description>${xml(C.description)}</description>
+    <lastBuildDate>${rfc(articles[0]?.date || new Date().toISOString().slice(0, 10))}</lastBuildDate>
+    <language>${xml(C.language)}</language>
+    <atom:link href="${xml(abs(u('/rss.xml')))}" rel="self" type="application/rss+xml"/>
 ${items}
   </channel>
 </rss>
@@ -398,8 +511,9 @@ ${emitted.map((p) => {
 {
   fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(DIST, 'assets/tokens.css'), tokensCss(C));
-  for (const f of ['theme.css', 'site.js', 'font-tester.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
+  for (const f of ['theme.css', 'site.js', 'font-tester.js', 'comments.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
   if (fs.existsSync(path.join(ROOT, 'public'))) fs.cpSync(path.join(ROOT, 'public'), DIST, { recursive: true });
 }
 
+if (scheduled.length) console.log(`⏰ ${scheduled.length} scheduled article${scheduled.length === 1 ? '' : 's'} not published yet (they go live on their date):\n   ${scheduled.join('\n   ')}`);
 console.log(`✔ ${C.name}: ${articles.length} articles, ${categories.length} categories, ${tags.length} tags → dist/  (base "${base || '/'}", url ${siteUrl})`);

@@ -5,6 +5,8 @@ date: 2026-09-21
 category: Tutorials
 tags: [git, github, tutorials]
 excerpt: Git tracks your changes on your own computer; GitHub is a place to share them. A short, practical tour of the everyday workflow.
+series: Developer Basics
+seriesOrder: 3
 ---
 
 People often use "Git" and "GitHub" as if they were the same thing. They are not, and knowing the difference makes everything else easier.

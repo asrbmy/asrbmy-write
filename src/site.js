@@ -17,10 +17,18 @@
   if (themeBtn) {
     themeBtn.innerHTML = '<span class="i-moon">' + themeBtn.innerHTML + '</span>' +
       '<span class="i-sun"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>';
+    const sync = () => themeBtn.setAttribute('aria-pressed', String(root.getAttribute('data-theme') === 'dark'));
+    sync();
     themeBtn.addEventListener('click', () => {
       const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       root.setAttribute('data-theme', next);
       store.set('asrbmy-theme', next);
+      sync();
+    });
+    // Follow the system setting live, unless the reader picked a theme themselves
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', (e) => {
+      if (store.get && store.get('asrbmy-theme')) return;
+      root.setAttribute('data-theme', e.matches ? 'dark' : 'light'); sync();
     });
   }
 
@@ -155,5 +163,36 @@
       });
       $('form', app).addEventListener('submit', (e) => { e.preventDefault(); render(input.value); });
     }).catch(() => { status.textContent = 'Search is unavailable right now. Browse all articles instead.'; });
+  }
+
+  // ── Reading progress + "on this page" highlighting (article pages) ─────────
+  const bar = document.querySelector('#read-progress span');
+  const article = document.querySelector('.article .prose');
+  if (article) {
+    const links = [...document.querySelectorAll('.toc a[href^="#"], .side-toc a[href^="#"]')];
+    const targets = [...new Set(links.map((a) => a.getAttribute('href').slice(1)))]
+      .map((id) => document.getElementById(id)).filter(Boolean);
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      if (bar) {
+        const r = article.getBoundingClientRect();
+        const total = r.height - innerHeight * 0.6;
+        const done = total > 0 ? Math.min(1, Math.max(0, (innerHeight * 0.2 - r.top) / total)) : 0;
+        bar.style.transform = `scaleX(${done.toFixed(4)})`;
+      }
+      if (targets.length) {
+        let current = null;
+        for (const t of targets) if (t.getBoundingClientRect().top <= 120) current = t.id;
+        for (const a of links) {
+          if (a.getAttribute('href') === '#' + current) a.setAttribute('aria-current', 'location');
+          else a.removeAttribute('aria-current');
+        }
+      }
+    };
+    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll);
+    update();
   }
 })();

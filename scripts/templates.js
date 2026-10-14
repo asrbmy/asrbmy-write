@@ -1,5 +1,10 @@
 // HTML templates. Every site-specific string comes from `S.config` / article data.
+import crypto from 'node:crypto';
 import { esc } from './markdown.js';
+
+// Runs before the page paints so a saved dark/light choice never flashes. Its hash is allowed in the CSP.
+const THEME_SCRIPT = "try{var t=localStorage.getItem('asrbmy-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}";
+const THEME_HASH = `'sha256-${crypto.createHash('sha256').update(THEME_SCRIPT).digest('base64')}'`;
 
 const ICONS = {
   search: '<path d="M7 12.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11Zm4-1.5 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
@@ -29,10 +34,12 @@ export function createTemplates(S) {
   const metaLine = (a) =>
     `<p class="meta"><time datetime="${a.date}">${S.fmtDate(a.date)}</time><span aria-hidden="true">·</span><span>${a.readingTime} min read</span></p>`;
 
-  function articleCard(a, { featured = false } = {}) {
-    return `<article class="card${featured ? ' card--featured' : ''}">
+  // `level` is the heading level of the card title — 2 under a page <h1>, 3 under a section <h2>.
+  function articleCard(a, { featured = false, level = 2 } = {}) {
+    return `<article class="card${featured ? ' card--featured' : ''}${a.cover ? ' card--cover' : ''}">
+  ${a.cover ? `<a class="card__cover" href="${u(a.url)}" tabindex="-1" aria-hidden="true"><img src="${esc(S.imgSrc(a.cover))}" alt="" width="1200" height="630" loading="lazy" decoding="async"></a>` : ''}
   <p class="kicker">${catLink(a.category)}</p>
-  <h${featured ? 2 : 3} class="card__title"><a href="${u(a.url)}">${esc(a.title)}</a></h${featured ? 2 : 3}>
+  <h${level} class="card__title"><a href="${u(a.url)}">${esc(a.title)}</a></h${level}>
   <p class="card__excerpt">${esc(a.excerpt)}</p>
   <div class="card__foot">${metaLine(a)}${tagChips(a.tags)}</div>
 </article>`;
@@ -63,8 +70,9 @@ export function createTemplates(S) {
 
   function nav(path) {
     const items = C.nav
+      .filter((item) => S.hasRoute(item.href))
       .map((item, i) => {
-        const kids = navChildren(item);
+        const kids = navChildren(item).filter((k) => S.hasRoute(k.href));
         const active = isActive(item, path) || kids.some((k) => path === u(k.href));
         const link = `<a class="nav__link" href="${u(item.href)}"${active ? ' aria-current="page"' : ''}>${esc(item.label)}</a>`;
         if (!kids.length) return `<li class="nav__item${active ? ' is-active' : ''}">${link}</li>`;
@@ -87,7 +95,7 @@ export function createTemplates(S) {
     </a>
     <div class="header__actions">
       ${(C.headerActions || []).map((a) => `<a class="btn-ghost${a.accent ? ' btn-ghost--accent' : ''}" href="${u(a.href)}">${esc(a.label)} ${icon('arrow', 14)}</a>`).join('\n      ')}
-      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch colour theme">${icon('moon', 16)}</button>
+      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch colour theme" aria-pressed="false">${icon('moon', 16)}</button>
       <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">${icon('menu', 18)}</button>
     </div>
   </div>
@@ -96,13 +104,14 @@ export function createTemplates(S) {
   }
 
   // ── Sidebar ────────────────────────────────────────────────────────────────
-  function sidebar() {
+  function sidebar(extra = '') {
     const sb = C.sidebar || {};
     const featured = sb.showFeatured ? S.articles.find((a) => a.featured) : null;
     const recent = S.articles.slice(0, sb.recentCount ?? 5);
     const promo = sb.promo;
     const start = sb.start;
     return `<aside class="sidebar" aria-label="Sidebar">
+    ${extra}
   <section class="side-block">
     <h2 class="side-title">Search Articles</h2>
     <form class="side-search" role="search" action="${u('/search/')}" method="get">
@@ -190,7 +199,12 @@ export function createTemplates(S) {
     const desc = (o.description || C.description).replace(/\s+/g, ' ').trim();
     const canon = S.abs(o.canonicalPath || o.path);
     const seo = C.seo || {};
-    const ogImg = S.abs(u(o.ogImage || seo.ogImage || '/og-default.png'));
+    const ogRaw = o.ogImage || seo.ogImage || '/og-default.png';
+    const ogImg = S.abs(S.imgSrc(ogRaw));
+    const sec = C.security || {};
+    const gc = C.comments?.enabled ? ' https://giscus.app' : '';
+    const csp = sec.csp === false ? '' : `<meta http-equiv="Content-Security-Policy" content="${esc(
+      `default-src 'none'; script-src 'self' ${THEME_HASH}${gc}; style-src 'self'; img-src ${sec.imgSrc || "'self' data: https:"}; font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; ${gc ? `frame-src${gc}; ` : ''}base-uri 'self'; object-src 'none'${sec.extra ? '; ' + sec.extra : ''}`)}">`;
     const robots = o.noindex ? 'noindex,follow' : 'index,follow,max-image-preview:large,max-snippet:-1';
     const a = o.article;
     const ld = [...(o.jsonld ? (Array.isArray(o.jsonld) ? o.jsonld : [o.jsonld]) : [])];
@@ -212,6 +226,8 @@ export function createTemplates(S) {
 <link rel="canonical" href="${esc(canon)}">
 ${o.prev ? `<link rel="prev" href="${esc(S.abs(o.prev))}">` : ''}${o.next ? `<link rel="next" href="${esc(S.abs(o.next))}">` : ''}
 <meta name="color-scheme" content="light dark">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+${csp}
 <meta name="theme-color" content="${esc(C.theme['header-bg'])}">
 <meta property="og:site_name" content="${esc(C.name)}">
 <meta property="og:locale" content="${esc(seo.locale || 'en_US')}">
@@ -236,25 +252,27 @@ ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
 <link rel="apple-touch-icon" href="${u('/apple-touch-icon.png')}">
 <link rel="manifest" href="${u('/manifest.webmanifest')}">
 <link rel="alternate" type="application/rss+xml" title="${esc(C.name)}" href="${u('/rss.xml')}">
-<script>try{var t=localStorage.getItem('asrbmy-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
-<link rel="stylesheet" href="${u('/assets/tokens.css')}">
-<link rel="stylesheet" href="${u('/assets/theme.css')}">
+<script>${THEME_SCRIPT}</script>
+<link rel="stylesheet" href="${S.asset('tokens.css')}">
+<link rel="stylesheet" href="${S.asset('theme.css')}">
+<noscript><style>.navbar{display:block!important}.menu-btn{display:none!important}</style></noscript>
 ${ld.length ? `<script type="application/ld+json">${JSON.stringify(ld.length === 1 ? ld[0] : ld).replace(/</g, '\\u003c')}</script>` : ''}
 </head>
 <body class="${o.bodyClass || ''}">
 ${header(o.path)}
+${o.progress ? '<div class="read-progress" id="read-progress" aria-hidden="true"><span></span></div>' : ''}
 <div class="stage"><div class="wrap">
 ${o.crumbs ? crumbs(o.crumbs) : ''}
 <div class="layout${o.wide ? ' layout--wide' : ''}">
-<main id="main" class="main">
+<main id="main" class="main" tabindex="-1">
 ${o.body}
 </main>
-${o.wide ? '' : sidebar()}
+${o.wide ? '' : sidebar(o.sideExtra)}
 </div>
 </div></div>
 ${footer()}
-<script src="${u('/assets/site.js')}" defer></script>
-${(o.scripts || []).map((x) => `<script src="${u(x)}" defer></script>`).join('\n')}
+<script src="${S.asset('site.js')}" defer></script>
+${(o.scripts || []).map((x) => `<script src="${S.asset(x)}" defer></script>`).join('\n')}
 </body>
 </html>
 `;

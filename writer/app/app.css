@@ -46,6 +46,13 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--bg); 
 .f--checks { grid-column: 4; justify-content: flex-end; font-size: 13px; }
 .f--checks label { display: flex; gap: 6px; align-items: center; font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 13px; }
 .f label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.more { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 3px; padding: 8px 12px; }
+.more summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.more__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; margin-top: 10px; }
+.more__hint { margin: 10px 0 2px; font-size: 12px; color: var(--muted); }
+.f--inline { grid-column: auto; justify-content: center; }
+@media (max-width: 900px) { .more__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .more__grid { grid-template-columns: 1fr; } }
 .f small { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .f input:not([type=checkbox]), .f textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; border-radius: 3px; }
 .f textarea { resize: vertical; }
