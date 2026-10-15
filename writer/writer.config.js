@@ -31,4 +31,32 @@ export default {
 
   // Save to disk automatically this many seconds after you stop typing (0 = manual only)
   autosaveSeconds: 3,
+
+  // Aim for this many words per article. The Writer shows a progress bar (0 = hide it).
+  wordGoal: 800,
+
+  // "Publish" button: adds your new articles and images to Git, commits and pushes, so GitHub Pages
+  // updates the site. It needs Git installed and this folder to be a Git repository with a remote
+  // (the setup GitHub shows after you create a repository). Set enabled: false to hide the button.
+  publish: { enabled: true, message: 'Add article: {title}' },
+
+  // Starting points shown under "New article". Add your own: { id, label, category, tags, body }.
+  templates: [
+    {
+      id: 'tutorial', label: 'Tutorial', category: 'Tutorials', tags: ['tutorials'],
+      body: `## What you will build\n\nOne or two sentences on the result, and who it is for.\n\n## Before you start\n\n- What you need installed\n- What you should already know\n\n## Step 1: \n\nExplain the step, then show it.\n\n\`\`\`bash\ncommand here\n\`\`\`\n\n## Step 2: \n\n## Check that it works\n\nHow the reader can tell they are done.\n\n## Where to go next\n\n- Link to a related article\n`,
+    },
+    {
+      id: 'research', label: 'Research note', category: 'Research', tags: ['research', 'notes'],
+      body: `## The question\n\nWhat were you trying to find out?\n\n## What I found\n\n- Finding one\n- Finding two\n\n## Evidence and sources\n\n1. Source, and what it shows\n\n## What I doubt\n\nWhere could this be wrong?\n\n## One line to remember\n\n`,
+    },
+    {
+      id: 'essay', label: 'Essay', category: 'Personal', tags: ['writing'],
+      body: `## The idea in one sentence\n\n\n\n## Why it matters\n\n\n\n## The story behind it\n\n\n\n## What I think now\n\n`,
+    },
+    {
+      id: 'howto', label: 'Quick tip', category: 'Notes', tags: ['tips'],
+      body: `## The problem\n\n\n\n## The fix\n\n\n\n## Why it works\n\n`,
+    },
+  ],
 };

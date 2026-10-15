@@ -52,6 +52,26 @@ for (const file of htmlFiles) {
     try { JSON.parse(m[1]); } catch { problems.push(`${rel}: invalid JSON-LD`); }
   }
   for (const m of html.matchAll(/<img\b[^>]*>/g)) if (!/\balt="/.test(m[0])) problems.push(`${rel}: <img> without alt`);
+  // valid HTML: every id appears once per page
+  const seenIds = new Map();
+  for (const m of html.matchAll(/\sid="([^"]+)"/g)) seenIds.set(m[1], (seenIds.get(m[1]) || 0) + 1);
+  for (const [id, n] of seenIds) if (n > 1) problems.push(`${rel}: id="${id}" used ${n} times`);
+  if ((html.match(/<main[\s>]/g) || []).length !== 1) problems.push(`${rel}: expected exactly one <main>`);
+  if ((html.match(/<form\b[^>]*target="_blank"[^>]*>/g) || []).some((t) => !/rel="[^"]*noopener/.test(t))) problems.push(`${rel}: <form target=_blank> without rel=noopener`);
+  // responsive picture variants must exist
+  for (const m of html.matchAll(/\ssrcset="([^"]*)"/g)) {
+    for (const part of m[1].split(',')) {
+      const u0 = part.trim().split(/\s+/)[0];
+      if (!u0 || /^https?:/.test(u0)) continue;
+      const pth = decodeURIComponent(u0.split('?')[0]);
+      if (!pth.startsWith('/') || !exists(base && pth.startsWith(base + '/') ? pth.slice(base.length) : pth)) problems.push(`${rel}: srcset image missing ${u0}`);
+    }
+  }
+  // language links point at real pages
+  for (const m of html.matchAll(/<link rel="alternate" hreflang="[^"]+" href="https?:\/\/[^/"]+([^"]*)"/g)) {
+    const pth = m[1];
+    if (!exists(base && pth.startsWith(base + '/') ? pth.slice(base.length) : pth)) problems.push(`${rel}: hreflang link to missing page ${pth}`);
+  }
   if (rel === 'index.html' && /name="robots" content="noindex/.test(html)) problems.push('index.html must not be noindex');
   for (const m of html.matchAll(/\s(?:href|src)="([^"]*)"/g)) {
     let url = m[1];

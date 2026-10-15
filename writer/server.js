@@ -142,7 +142,9 @@ async function api(req, res, p, url) {
     const cats = [...new Set([...arts.map((a) => a.category).filter(Boolean), ...(W.categories || [])])].sort();
     const tags = [...new Set(arts.flatMap((a) => a.tags))].sort();
     const series = [...new Set(arts.map((a) => a.series).filter(Boolean))].sort();
-    return json(res, 200, { siteName: SITE.name, author: DEFAULT_AUTHOR, defaultCategory: W.defaultCategory || 'Notes', categories: cats, tags, series, autosaveSeconds: Number(W.autosaveSeconds) || 0, articlesDir: ARTICLES, imagesDir: IMAGES, filenameDate: W.filenameDate !== false });
+    return json(res, 200, { siteName: SITE.name, author: DEFAULT_AUTHOR, defaultCategory: W.defaultCategory || 'Notes', categories: cats, tags, series, autosaveSeconds: Number(W.autosaveSeconds) || 0, articlesDir: ARTICLES, imagesDir: IMAGES, filenameDate: W.filenameDate !== false,
+      wordGoal: Number(W.wordGoal) || 0, publishEnabled: W.publish?.enabled !== false,
+      templates: (W.templates || []).filter((t) => t && t.id && t.label).map((t) => ({ id: String(t.id), label: String(t.label), category: t.category || '', tags: Array.isArray(t.tags) ? t.tags : [], body: String(t.body || '') })) });
   }
   if (method === 'GET' && p === '/api/articles') return json(res, 200, listFiles());
 
@@ -200,6 +202,34 @@ async function api(req, res, p, url) {
     const { html, toc } = renderMarkdown(body, { base: '' });
     const n = words(htmlToText(html));
     return json(res, 200, { html, headings: toc.length, words: n, readingTime: Math.max(1, Math.round(n / 220)) });
+  }
+
+  // ── Publish: git add → commit → push, limited to the articles and images folders ──
+  if (p === '/api/publish' && (method === 'GET' || method === 'POST')) {
+    if (W.publish?.enabled === false) throw new HttpError(403, 'Publishing is switched off in writer/writer.config.js.');
+    const git = (args, timeout = 60000) => new Promise((resolve) => execFile('git', args, { cwd: ROOT, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' }, maxBuffer: 4 * 1024 * 1024 }, (err, out, errOut) => resolve({ ok: !err, out: String(out), err: String(errOut || (err && err.message) || '') })));
+    const inside = await git(['rev-parse', '--show-toplevel']);
+    if (!inside.ok) throw new HttpError(400, 'This folder is not a Git repository yet, or Git is not installed. Publish by uploading the files on GitHub instead, or set up Git first (see the README).');
+    const top = fs.realpathSync(inside.out.trim());
+    const rel = (d) => path.relative(top, fs.realpathSync(d));
+    const paths = [...new Set([rel(ARTICLES), rel(IMAGES)])];
+    if (paths.some((x) => x.startsWith('..') || path.isAbsolute(x))) throw new HttpError(400, 'Your articles or images folder is outside this Git repository, so it cannot be published from here. Move it inside the project, or upload the files by hand.');
+    const status = await git(['status', '--porcelain', '--', ...paths]);
+    const changes = status.out.split('\n').filter(Boolean).map((l) => ({ state: l.slice(0, 2).trim() || '?', file: l.slice(3) }));
+    const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out.trim();
+    const remote = (await git(['remote'])).out.split('\n').filter(Boolean)[0] || '';
+    if (method === 'GET') return json(res, 200, { changes, branch, remote });
+    if (!remote) throw new HttpError(400, 'No GitHub remote is set up for this repository yet (git remote add origin …).');
+    if (!changes.length) return json(res, 200, { ok: true, nothing: true, output: 'Nothing new to publish.' });
+    const { message = '' } = await readJson(req);
+    const msg = String(message).replace(/[\r\n]+/g, ' ').trim().slice(0, 120) || 'Add article';
+    const log = [];
+    for (const [label, args] of [['add', ['add', '--', ...paths]], ['commit', ['commit', '-m', msg, '--', ...paths]], ['push', ['push', remote, 'HEAD']]]) {
+      const r = await git(args, label === 'push' ? 120000 : 60000);
+      log.push(`$ git ${label}\n${(r.out + r.err).trim()}`);
+      if (!r.ok) return json(res, 200, { ok: false, step: label, output: log.join('\n\n') });
+    }
+    return json(res, 200, { ok: true, output: log.join('\n\n'), branch });
   }
 
   if (method === 'POST' && p === '/api/build') {

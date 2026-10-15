@@ -1,6 +1,7 @@
 // HTML templates. Every site-specific string comes from `S.config` / article data.
 import crypto from 'node:crypto';
 import { esc } from './markdown.js';
+import { analyticsInfo, newsletterInfo } from './features.js';
 
 // Runs before the page paints so a saved dark/light choice never flashes. Its hash is allowed in the CSP.
 const THEME_SCRIPT = "try{var t=localStorage.getItem('asrbmy-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}";
@@ -16,6 +17,10 @@ const ICONS = {
   x: '<path fill="currentColor" d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>',
   linkedin: '<path fill="currentColor" d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854zm4.943 12.248V6.169H2.542v7.225zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248S2.4 3.226 2.4 3.934c0 .694.521 1.248 1.327 1.248zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016l.016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225z"/>',
   mail: '<path d="M1.500 3.500h13v9h-13zM1.800 4l6.200 5 6.200-5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>',
+  link: '<path d="M6.500 9.500a3 3 0 0 0 4.200 0l2.300-2.300a3 3 0 0 0-4.200-4.200L7.700 4.100M9.500 6.500a3 3 0 0 0-4.200 0L3 8.800a3 3 0 0 0 4.200 4.200l1.100-1.100" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linecap="round"/>',
+  share: '<path d="M8 10V2M5 5l3-3 3 3M3 9v4.500h10V9" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linecap="round" stroke-linejoin="round"/>',
+  bookmark: '<path d="M3.500 1.500h9v13L8 11l-4.500 3.500z" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linejoin="round"/>',
+  print: '<path d="M4 6V1.500h8V6M4 11.500H1.500V6h13v5.500H12M4 9.500h8v5H4z" fill="none" stroke="currentColor" stroke-width="1.300" stroke-linejoin="round"/>',
   rss: '<path d="M2 2.500a11.500 11.500 0 0 1 11.500 11.500M2 7a7 7 0 0 1 7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="3" cy="13" r="1.4" fill="currentColor"/>',
 };
 export const icon = (name, size = 16) =>
@@ -23,6 +28,8 @@ export const icon = (name, size = 16) =>
 
 export function createTemplates(S) {
   const { config: C, u } = S;
+  const analytics = analyticsInfo(C);
+  const newsletter = newsletterInfo(C);
 
   // ── Small helpers ──────────────────────────────────────────────────────────
   const catLink = (name) => `<a href="${u(`/categories/${S.catSlug(name)}/`)}">${esc(name)}</a>`;
@@ -103,6 +110,47 @@ export function createTemplates(S) {
 <div class="navbar"><div class="wrap">${nav(path)}</div></div>`;
   }
 
+  // ── Newsletter form ────────────────────────────────────────────────────────
+  function newsletterForm(where = 'article') {
+    if (!newsletter) return '';
+    const id = `nl-${where}`;
+    return `<form class="newsletter" method="post" action="${esc(newsletter.action)}" target="_blank" rel="noopener noreferrer" aria-labelledby="${id}-t">
+  <h2 class="newsletter__title" id="${id}-t">${esc(newsletter.title)}</h2>
+  <p>${esc(newsletter.text)}</p>
+  ${Object.entries(newsletter.hidden).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
+  <div class="newsletter__row">
+    <label class="sr-only" for="${id}-e">Email address</label>
+    <input id="${id}-e" type="email" name="${esc(newsletter.field)}" placeholder="${esc(newsletter.placeholder)}" autocomplete="email" required>
+    <button type="submit" class="btn">${esc(newsletter.button)}</button>
+  </div>
+  <p class="newsletter__note">${esc(newsletter.note)}</p>
+</form>`;
+  }
+
+  // ── Share / save / print bar ───────────────────────────────────────────────
+  function shareBar(a) {
+    const sh = C.share || {};
+    if (sh.enabled === false) return '';
+    const url = encodeURIComponent(S.abs(a.url ? u(a.url) : '/'));
+    const title = encodeURIComponent(a.title);
+    const links = {
+      x: ['X', `https://twitter.com/intent/tweet?url=${url}&text=${title}`],
+      linkedin: ['LinkedIn', `https://www.linkedin.com/sharing/share-offsite/?url=${url}`],
+      whatsapp: ['WhatsApp', `https://wa.me/?text=${title}%20${url}`],
+      facebook: ['Facebook', `https://www.facebook.com/sharer/sharer.php?u=${url}`],
+      email: ['Email', `mailto:?subject=${title}&body=${url}`],
+    };
+    const targets = (sh.targets || ['x', 'linkedin', 'whatsapp', 'email']).filter((t) => links[t]);
+    return `<div class="share" data-url="${esc(S.abs(u(a.url)))}" data-title="${esc(a.title)}" role="group" aria-label="Share, save or print this article">
+  <button type="button" class="share__btn" data-copy>${icon('link', 14)} Copy link</button>
+  <button type="button" class="share__btn" data-native hidden>${icon('share', 14)} Share…</button>
+  ${targets.map((t) => `<a class="share__btn" href="${esc(links[t][1])}" rel="noopener noreferrer"${t === 'email' ? '' : ' target="_blank"'}>${esc(links[t][0])}</a>`).join('\n  ')}
+  <button type="button" class="share__btn" data-bookmark aria-pressed="false">${icon('bookmark', 14)} <span>Save for later</span></button>
+  <button type="button" class="share__btn" data-print>${icon('print', 14)} Print / PDF</button>
+  <span class="share__status" role="status" aria-live="polite"></span>
+</div>`;
+  }
+
   // ── Sidebar ────────────────────────────────────────────────────────────────
   function sidebar(extra = '') {
     const sb = C.sidebar || {};
@@ -110,6 +158,12 @@ export function createTemplates(S) {
     const recent = S.articles.slice(0, sb.recentCount ?? 5);
     const promo = sb.promo;
     const start = sb.start;
+    const best = sb.best === false ? [] : S.bestList.slice(0, sb.bestCount ?? 4);
+    const bestBlock = best.length ? `<section class="side-block">
+    <h2 class="side-title">${esc(sb.bestTitle || 'Best of')}</h2>
+    <ul class="side-recent">${best.map((a) => `<li><a href="${u(a.url)}">${esc(a.title)}</a><span class="side-recent__meta">${esc(a.category)} · ${a.readingTime} min</span></li>`).join('')}</ul>
+    <p class="more"><a href="${u('/best/')}">See all ${icon('arrow', 14)}</a></p>
+  </section>` : '';
     return `<aside class="sidebar" aria-label="Sidebar">
     ${extra}
   <section class="side-block">
@@ -142,8 +196,10 @@ export function createTemplates(S) {
   ${(sb.tools || []).length ? `<section class="side-block">
     <p class="side-label">${esc(sb.toolsLabel || 'Tools')}</p>
     <h2 class="side-title side-title--lg">${esc(sb.toolsTitle || 'Tools')}</h2>
-    <ul class="side-tools">${sb.tools.map((t) => `<li><a href="${u(t.href)}"><span class="side-tools__text"><strong>${esc(t.label)}</strong><small>${esc(t.desc || '')}</small></span><span class="badge">Tool</span></a></li>`).join('')}</ul>
+    <ul class="side-tools">${sb.tools.filter((t) => S.hasRoute(t.href)).map((t) => `<li><a href="${u(t.href)}"><span class="side-tools__text"><strong>${esc(t.label)}</strong><small>${esc(t.desc || '')}</small></span><span class="badge">Tool</span></a></li>`).join('')}</ul>
   </section>` : ''}
+  ${bestBlock}
+  ${newsletter && sb.newsletter ? `<section class="side-block">${newsletterForm('side')}</section>` : ''}
   ${(sb.downloads || []).length ? `<section class="side-block">
     <h2 class="side-title side-title--lg">Downloads</h2>
     <ul class="side-links side-links--plain">${sb.downloads.map((d) => `<li><a href="${d.href.startsWith('/') ? u(d.href) : esc(d.href)}">${esc(d.label)}</a></li>`).join('')}</ul>
@@ -175,12 +231,12 @@ export function createTemplates(S) {
   <div class="wrap">
     <div class="footer__top">
       <a class="brand brand--footer" href="${u('/')}"><span class="brand__mark"><img src="${u(C.logo.src)}" alt="" width="36" height="36"></span><span class="brand__text"><span class="brand__name">${esc(C.name)}</span><span class="brand__tag">${esc(C.tagline)}</span></span></a>
-      <nav aria-label="Footer"><ul class="footer__links">${(f.links || []).map((l) => `<li><a href="${u(l.href)}">${esc(l.label)}</a></li>`).join('')}</ul></nav>
+      <nav aria-label="Footer"><ul class="footer__links">${(f.links || []).filter((l) => S.hasRoute(l.href)).map((l) => `<li><a href="${u(l.href)}">${esc(l.label)}</a></li>`).join('')}</ul></nav>
       <div class="footer__social">${social}</div>
     </div>
     <div class="footer__bottom">
       <p>© ${new Date().getFullYear()} <strong>${esc(f.copyright || C.name)}</strong>. All rights reserved.</p>
-      <ul>${(f.legal || []).map((l) => `<li><a href="${l.href.startsWith('/') ? u(l.href) : esc(l.href)}">${esc(l.label)}</a></li>`).join('')}</ul>
+      <ul>${(f.legal || []).filter((l) => S.hasRoute(l.href)).map((l) => `<li><a href="${l.href.startsWith('/') ? u(l.href) : esc(l.href)}">${esc(l.label)}</a></li>`).join('')}</ul>
     </div>
   </div>
 </footer>`;
@@ -202,9 +258,28 @@ export function createTemplates(S) {
     const ogRaw = o.ogImage || seo.ogImage || '/og-default.png';
     const ogImg = S.abs(S.imgSrc(ogRaw));
     const sec = C.security || {};
-    const gc = C.comments?.enabled ? ' https://giscus.app' : '';
+    const f = o.features || {};
+    const cm = C.comments?.enabled === true;
+    const dirs = {
+      'default-src': ["'none'"],
+      'script-src': ["'self'", THEME_HASH, ...(cm ? ['https://giscus.app'] : []), ...(analytics?.script || [])],
+      'style-src': ["'self'", ...(f.mermaid ? ["'unsafe-inline'"] : [])], // diagrams draw with inline styles
+      'img-src': [sec.imgSrc || "'self' data: https:"],
+      'font-src': ["'self'"],
+      'connect-src': ["'self'", ...(analytics?.connect || [])],
+      'frame-src': [...(cm ? ['https://giscus.app'] : []), ...(f.video ? ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'] : [])],
+      'manifest-src': ["'self'"],
+      'form-action': ["'self'", ...(newsletter ? [newsletter.origin] : [])],
+      'base-uri': ["'self'"],
+      'object-src': ["'none'"],
+    };
     const csp = sec.csp === false ? '' : `<meta http-equiv="Content-Security-Policy" content="${esc(
-      `default-src 'none'; script-src 'self' ${THEME_HASH}${gc}; style-src 'self'; img-src ${sec.imgSrc || "'self' data: https:"}; font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; ${gc ? `frame-src${gc}; ` : ''}base-uri 'self'; object-src 'none'${sec.extra ? '; ' + sec.extra : ''}`)}">`;
+      Object.entries(dirs).filter(([, v]) => v.length).map(([k, v]) => `${k} ${[...new Set(v)].join(' ')}`).join('; ') + (sec.extra ? '; ' + sec.extra : ''))}">`;
+    const lang = o.lang || C.language;
+    const dir = (S.langOf.get(lang) || {}).dir === 'rtl' ? ' dir="rtl"' : '';
+    const alt = o.alternates || [];
+    const mainAlt = alt.find((x) => x.lang === S.defaultLang);
+    const alternates = [...alt, ...(mainAlt ? [{ lang: 'x-default', url: mainAlt.url }] : [])].map((x) => `<link rel="alternate" hreflang="${esc(x.lang)}" href="${esc(S.abs(u(x.url)))}">`).join('\n');
     const robots = o.noindex ? 'noindex,follow' : 'index,follow,max-image-preview:large,max-snippet:-1';
     const a = o.article;
     const ld = [...(o.jsonld ? (Array.isArray(o.jsonld) ? o.jsonld : [o.jsonld]) : [])];
@@ -215,7 +290,7 @@ export function createTemplates(S) {
       });
     }
     return `<!doctype html>
-<html lang="${esc(C.language)}">
+<html lang="${esc(lang)}"${dir}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -228,6 +303,8 @@ ${o.prev ? `<link rel="prev" href="${esc(S.abs(o.prev))}">` : ''}${o.next ? `<li
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 ${csp}
+${alternates}
+${analytics ? analytics.tag : ''}
 <meta name="theme-color" content="${esc(C.theme['header-bg'])}">
 <meta property="og:site_name" content="${esc(C.name)}">
 <meta property="og:locale" content="${esc(seo.locale || 'en_US')}">
@@ -293,5 +370,5 @@ ${current < total ? `<a class="pager__item pager__next" href="${hrefFor(current 
 </nav>`;
   }
 
-  return { page, articleCard, crumbs, catLink, tagChips, metaLine, pagination, icon };
+  return { newsletterForm, shareBar, hasNewsletter: !!newsletter, page, articleCard, crumbs, catLink, tagChips, metaLine, pagination, icon };
 }

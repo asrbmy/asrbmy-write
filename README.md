@@ -50,6 +50,8 @@ It opens in your browser at `http://localhost:4400`. You need [Node.js](https://
 4. Use the toolbar for headings, bold, links, code blocks, tables and FAQ items. The counters beside Title and Excerpt show good lengths for search results.
 5. **Build site** checks that the whole website builds with your new article. **Download .md** gives you a copy of the file.
 
+**Writing tools:** pick a **template** (tutorial, research note, essay, quick tip) from the menu beside *New article*; watch the **word-goal** bar fill; press **Focus** for a distraction-free screen (Esc leaves it); press **Publish** to add, commit and push your new articles and images with Git, so GitHub Pages updates the site (needs Git and a repository with a remote; otherwise upload the files on GitHub as described below).
+
 **Settings** are in their own file, **`writer/writer.config.js`**: the folder articles are saved in, the images folder, the port, default category and author, file naming and autosave delay. For example, to keep articles outside the project, set `articlesDir: 'C:/Users/me/Documents/articles'`.
 
 **Put the article on your site** — pick whichever is easiest:
@@ -114,6 +116,35 @@ Comments use [Giscus](https://giscus.app), which keeps them in your repository's
 ### Reading aids
 
 Article pages show a reading-progress bar. On wide screens an "On this page" list stays visible at the top of the sidebar and highlights the section you are reading; on phones the table of contents sits above the article.
+
+### More things you can put in an article
+
+- **Diagrams:** a fenced block starting with ```` ```mermaid ```` is drawn as a flowchart, sequence diagram and more (see [mermaid.js.org](https://mermaid.js.org)). The drawing library is served from your own site, and only on pages that use it.
+- **Maths:** `$e^{i\pi}+1=0$` inline, or `$$ … $$` on its own lines. It is rendered at build time. Dollar amounts like $5 and $10 stay as text.
+- **Videos:** `@[youtube](VIDEO_ID "Title")` or `@[vimeo](12345 "Title")`. Visitors see a play button; nothing loads from the video site until they press it.
+- **Pictures that follow the theme:** put `photo.png` and `photo.dark.png` in `public/images` and write `![Alt](/images/photo.png)`. Light mode shows the first, dark mode the second.
+- **Smaller pictures, automatically:** with the optional `sharp` package installed (it is by default), every PNG/JPG in `public/images` gets 480/960/1600px WebP copies and pages use them through `srcset`. Your originals are never changed.
+- **Glossary hints:** write terms in `content/glossary.md` (`## Term`, a line, then the meaning; `## Term | alias` for alternatives). The first mention of each term in an article shows its meaning on hover or focus and links to the Glossary page. Turn it off for one article with `glossary: false`.
+
+### Best of, authors, projects, changelog, reading list
+
+- **Best of:** add `best: true` to an article. They appear on `/best/` and in a sidebar list.
+- **Authors:** put `author: Name` in an article. Add extra writers in `authors` in `site.config.js`. Each gets a page at `/authors/<name>/`.
+- **Projects:** one Markdown file per project in `content/projects/` (title, summary, status, tech, url, repo, cover, order). They appear on `/projects/` and in the menu.
+- **Changelog:** edit `content/pages/changelog.md`.
+- **Reading list:** every article has **Save for later**. The list lives in the reader's own browser (`/bookmarks/`), never on a server.
+- **Share and print:** every article has Copy link, Share, X/LinkedIn/WhatsApp/email, Save and Print/PDF buttons. Printing produces a clean page without menus, with link addresses spelled out.
+
+### Translations
+
+List languages in `languages` in `site.config.js` (the first is the main one). Write the translation as its own article with `lang: hi` and `translationOf: <slug of the original>`. It appears at `/hi/articles/…`, readers get a language switcher, and search engines get `hreflang` links. Menus and buttons stay in the main language; edit their labels in the config. For a right-to-left language add `dir: 'rtl'`.
+
+### Newsletter and analytics (optional)
+
+Both are off until you fill in `newsletter` and `analytics` in `site.config.js`.
+
+- **Newsletter:** a sign-up form under each article (and optionally in the sidebar) that posts to Buttondown, Mailchimp or any service with a form address. No server of your own is needed.
+- **Analytics:** Plausible, GoatCounter or a custom script. The Privacy page updates itself to say which one you use, and the Content-Security-Policy allows only that service.
 
 ### Edit or remove an article
 
@@ -191,6 +222,7 @@ dist/                   generated output (not committed)
 
 - **No scripts from authors.** Raw HTML in articles goes through an allow-list: `<script>`, `<iframe>`, forms, inline styles, `on…` handlers and `javascript:` / `data:` links are removed or shown as text.
 - **Content-Security-Policy** on every page allows only the site's own scripts and styles. To embed something external (a video), add its address to `security.extra` in `site.config.js`.
+- **Diagram pages** are the only pages that allow inline styles (the diagram library needs them); every other page does not. Video, comment, analytics and newsletter services are allowed only on the pages that use them, and only the exact addresses involved.
 - **Writer app** listens on `127.0.0.1` only, needs a random per-run token, rejects foreign Host headers, writes files atomically and checks that uploaded images really are images.
 - **Dev server** (`npm run dev`) is local-only by default and answers malformed URLs safely; set `HOST=0.0.0.0` to share it on your network.
 - `npm audit` reports no known vulnerabilities in the two dependencies.

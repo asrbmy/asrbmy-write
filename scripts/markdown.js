@@ -1,6 +1,7 @@
 // Markdown + front matter helpers. No site-specific text lives here.
 import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/common';
+import katex from 'katex';
 
 export const esc = (s = '') =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -127,10 +128,11 @@ const RESERVED_ID = /^(main|site-nav|q|side-q|theme-toggle|menu-btn|search-.*|su
 /**
  * Render markdown to HTML.
  * @param {string} md
- * @param {{base?: string, vars?: Record<string,string>}} opts
- * @returns {{html: string, toc: {depth:number,id:string,text:string}[]}}
+ * @param {{base?: string, vars?: Record<string,string>, images?: (src:string)=>({dark?:string, srcset?:{w:number,url:string}[]}|null)}} opts
+ * @returns {{html: string, toc: {depth:number,id:string,text:string}[], features: {mermaid:boolean, video:boolean, math:boolean}}}
  */
-export function renderMarkdown(md, { base = '', vars = {} } = {}) {
+export function renderMarkdown(md, { base = '', vars = {}, images = null } = {}) {
+  const features = { mermaid: false, video: false, math: false };
   md = String(md).replace(/^﻿/, '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (m, k) => (k in vars ? vars[k] : m));
 
   const toc = [];
@@ -144,9 +146,61 @@ export function renderMarkdown(md, { base = '', vars = {} } = {}) {
   const fixImage = (href) => fixHref(href.replace(/^(?:\.{1,2}\/)*(?:public\/)?(images\/)/, '/$1'));
 
   const marked = new Marked({ gfm: true, breaks: false });
+
+  // $inline$ and $$block$$ maths, rendered at build time as MathML (no scripts, fonts or inline styles needed)
+  const tex = (src, displayMode) => {
+    features.math = true;
+    try { return katex.renderToString(src, { output: 'mathml', displayMode, throwOnError: true, strict: 'ignore', trust: false, maxExpand: 200 }); }
+    catch { return `<code class="math-error" title="This formula could not be read">${esc(src)}</code>`; }
+  };
+  // @[youtube](VIDEO_ID "Title") — a click-to-play placeholder; nothing is loaded from the video site until pressed
+  const VIDEO = /^@\[(youtube|vimeo)\]\(\s*([\w-]{3,24})(?:\s+"([^"\n]{0,120})")?\s*\)[ \t]*(?:\n|$)/;
+  marked.use({
+    extensions: [
+      {
+        name: 'mathBlock', level: 'block',
+        start: (src) => src.indexOf('$$'),
+        tokenizer(src) {
+          const m = /^\$\$[ \t]*\n?([\s\S]+?)\n?[ \t]*\$\$[ \t]*(?:\n|$)/.exec(src);
+          if (m) return { type: 'mathBlock', raw: m[0], text: m[1].trim() };
+        },
+        renderer: (t) => `<div class="math-block">${tex(t.text, true)}</div>\n`,
+      },
+      {
+        name: 'mathInline', level: 'inline',
+        start: (src) => src.indexOf('$'),
+        tokenizer(src) {
+          const m = /^\$(?!\s)((?:\\.|[^$\n\\])+?)(?<!\s)\$(?![\d$])/.exec(src);
+          if (m) return { type: 'mathInline', raw: m[0], text: m[1] };
+        },
+        renderer: (t) => tex(t.text, false),
+      },
+      {
+        name: 'video', level: 'block',
+        start: (src) => src.indexOf('@['),
+        tokenizer(src) {
+          const m = VIDEO.exec(src);
+          if (!m) return;
+          if (m[1] === 'vimeo' && !/^\d+$/.test(m[2])) return;
+          return { type: 'video', raw: m[0], provider: m[1], id: m[2], title: m[3] || '' };
+        },
+        renderer: (t) => {
+          features.video = true;
+          const name = t.provider === 'youtube' ? 'YouTube' : 'Vimeo';
+          const title = t.title || 'Video';
+          return `<div class="video" data-provider="${t.provider}" data-id="${esc(t.id)}" data-title="${esc(title)}"><button type="button" class="video__play" aria-label="Play video: ${esc(title)}"><span class="video__icon" aria-hidden="true">▶</span><strong>${esc(title)}</strong><small>Loads ${name} when you press play</small></button></div>\n`;
+        },
+      },
+    ],
+  });
   marked.use({
     renderer: {
       html({ text }) { return sanitizeHtml(text, fixHref); },
+      paragraph({ tokens }) {
+        const inner = this.parser.parseInline(tokens);
+        // a captioned image becomes a <figure>, which must not sit inside a <p>
+        return tokens.length === 1 && tokens[0].type === 'image' && tokens[0].title ? inner + '\n' : `<p>${inner}</p>\n`;
+      },
       heading({ tokens, depth, text }) {
         const inner = this.parser.parseInline(tokens);
         if (depth < 2) depth = 2; // the page title is the only <h1>, so a "# Title" in the body becomes <h2>
@@ -161,6 +215,10 @@ export function renderMarkdown(md, { base = '', vars = {} } = {}) {
       },
       code({ text, lang }) {
         const l = (lang || '').trim().split(/\s+/)[0].toLowerCase();
+        if (l === 'mermaid') {
+          features.mermaid = true;
+          return `<figure class="diagram"><pre class="mermaid" aria-label="Diagram">${esc(text)}</pre></figure>\n`;
+        }
         const known = l && /^[a-z0-9+#_-]+$/.test(l) && hljs.getLanguage(l);
         const body = known ? hljs.highlight(text, { language: l, ignoreIllegals: true }).value : esc(text);
         const label = /^[a-z0-9+#_-]+$/.test(l) ? l : 'text';
@@ -183,7 +241,14 @@ export function renderMarkdown(md, { base = '', vars = {} } = {}) {
       image({ href, title, text }) {
         const safe = cleanUrl(href || '');
         if (safe === null) return esc(text);
-        const img = `<img src="${esc(fixImage(safe))}" alt="${esc(text)}" loading="lazy" decoding="async">`;
+        const norm = (x) => x.replace(/^(?:\.{1,2}\/)*(?:public\/)?(images\/)/, '/$1');
+        const info = images ? images(norm(safe)) : null;
+        const tag = (src, cls, alt) => {
+          const v = images ? images(norm(src)) : null;
+          const srcset = v?.srcset?.length ? ` srcset="${v.srcset.map((x) => `${esc(fixHref(x.url))} ${x.w}w`).join(', ')}" sizes="(min-width: 760px) 700px, 100vw"` : '';
+          return `<img${cls ? ` class="${cls}"` : ''} src="${esc(fixImage(src))}"${srcset} alt="${esc(alt)}" loading="lazy" decoding="async">`;
+        };
+        const img = info?.dark ? `<span class="themed-img">${tag(safe, 'img-light', text)}${tag(info.dark, 'img-dark', '')}</span>` : tag(safe, '', text);
         return title ? `<figure>${img}<figcaption>${esc(title)}</figcaption></figure>` : img;
       },
     },
@@ -191,5 +256,5 @@ export function renderMarkdown(md, { base = '', vars = {} } = {}) {
 
   let html = marked.parse(md);
   html = html.replace(/<table>/g, '<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table>').replace(/<\/table>/g, '</table></div>');
-  return { html, toc };
+  return { html, toc, features };
 }

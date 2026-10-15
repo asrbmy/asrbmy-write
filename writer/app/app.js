@@ -48,7 +48,7 @@
     el.comments.checked = front.comments !== false;
     el.body.value = body || '';
     slugTouched = !!file;
-    dirty = false; counters(); renderPreview(); buttons(); highlight();
+    dirty = false; counters(); renderPreview(); buttons(); highlight(); updateGoal();
   }
   function buttons() { el.del.disabled = el.download.disabled = !cur.file; }
 
@@ -226,6 +226,60 @@
     } catch (e) { say(e.message, 'err'); }
   });
 
+  // ── Word goal ──────────────────────────────────────────────────────────────
+  function updateGoal() {
+    const goal = Number(state.wordGoal) || 0, box = $('goal');
+    if (!goal) { box.hidden = true; return; }
+    const t = el.body.value.trim(), n = t ? t.split(/\s+/).length : 0;
+    box.hidden = false; box.classList.toggle('is-done', n >= goal);
+    $('goal-bar').value = Math.min(100, Math.round((n / goal) * 100));
+    $('goal-text').textContent = n >= goal ? `${n} words — goal reached` : `${n} / ${goal} words`;
+  }
+  el.body.addEventListener('input', updateGoal);
+
+  // ── Templates ──────────────────────────────────────────────────────────────
+  $('tpl').addEventListener('change', async (e) => {
+    const t = (state.templates || []).find((x) => x.id === e.target.value);
+    e.target.value = '';
+    if (!t) return;
+    await newArticle();
+    el.cat.value = t.category || state.defaultCategory; el.tags.value = (t.tags || []).join(', ');
+    el.body.value = t.body; counters(); updateGoal(); changed(); renderPreview();
+    say(`New ${t.label.toLowerCase()} — give it a title.`); el.title.focus();
+  });
+
+  // ── Focus mode ─────────────────────────────────────────────────────────────
+  const setFocus = (on) => { document.body.classList.toggle('focus', on); $('btn-focus').setAttribute('aria-pressed', String(on)); $('btn-focus').textContent = on ? 'Leave focus' : 'Focus'; if (on) { el.split.dataset.view = 'write'; el.body.focus(); } };
+  $('btn-focus').addEventListener('click', () => setFocus(!document.body.classList.contains('focus')));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('focus') && !$('pub').open) setFocus(false); });
+
+  // ── Publish (git add → commit → push) ──────────────────────────────────────
+  $('btn-publish').addEventListener('click', async () => {
+    if (dirty && !(await save(true))) return;
+    const dlg = $('pub'); $('pub-out').hidden = true; $('pub-out').textContent = ''; $('pub-go').disabled = true; $('pub-list').textContent = '';
+    $('pub-sum').textContent = 'Checking what is new…';
+    dlg.showModal();
+    try {
+      const r = await api('/api/publish');
+      $('pub-go').disabled = !r.changes.length || !r.remote;
+      $('pub-sum').textContent = !r.remote ? 'This repository has no GitHub remote yet, so nothing can be pushed.' : r.changes.length
+        ? `${r.changes.length} new or changed file${r.changes.length === 1 ? '' : 's'} will be sent to “${r.remote}” (${r.branch}). GitHub Pages then rebuilds the site.`
+        : 'Nothing new to publish.';
+      for (const c of r.changes) { const li = document.createElement('li'); li.textContent = `${c.state} ${c.file}`; $('pub-list').append(li); }
+      const first = list.find((a) => a.file === cur.file);
+      $('pub-msg').value = `Add article: ${first ? first.title : el.title.value || 'new writing'}`;
+    } catch (e) { $('pub-sum').textContent = e.message; }
+  });
+  $('pub-go').addEventListener('click', async () => {
+    $('pub-go').disabled = true; $('pub-sum').textContent = 'Publishing…';
+    try {
+      const r = await send('/api/publish', 'POST', { message: $('pub-msg').value });
+      $('pub-out').hidden = false; $('pub-out').textContent = r.output;
+      $('pub-sum').textContent = r.ok ? (r.nothing ? 'Nothing new to publish.' : 'Published. The site updates in about a minute.') : `Stopped at “git ${r.step}”. Details below.`;
+      say(r.ok ? 'Published.' : 'Publishing failed — see details.', r.ok ? 'ok' : 'err');
+    } catch (e) { $('pub-sum').textContent = e.message; }
+  });
+
   // ── Start ──────────────────────────────────────────────────────────────────
   (async () => {
     try {
@@ -235,6 +289,8 @@
       $('series-list').innerHTML = (state.series || []).map((c) => `<option value="${esc(c)}">`).join('');
       $('tag-list').innerHTML = state.tags.map((c) => `<option value="${esc(c)}">`).join('');
       el.foot.textContent = `Saved in: ${state.articlesDir}`;
+      for (const t of state.templates || []) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; $('tpl').append(o); }
+      $('btn-publish').hidden = !state.publishEnabled;
       await refresh();
       fill(null, { date: today(), category: state.defaultCategory }, '');
       say(`Ready. ${list.length} article${list.length === 1 ? '' : 's'} in your folder.`);

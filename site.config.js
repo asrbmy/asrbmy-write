@@ -30,6 +30,22 @@ export default {
     bio: 'I write about software, privacy, research habits and the things I learn along the way.',
   },
 
+  // Other languages. The FIRST one is the site's main language. To publish a translation, put an
+  // article in content/articles/ with `lang: hi` and `translationOf: <slug of the original>`.
+  // It then lives at /hi/articles/…, and readers see a language switcher and search engines get hreflang links.
+  // (Menus and buttons stay in the main language; edit their labels in this file as you like.)
+  languages: [
+    { code: 'en', label: 'English' },
+    { code: 'hi', label: 'हिन्दी' },
+    // { code: 'ar', label: 'العربية', dir: 'rtl' },
+  ],
+
+  // More writers. The author above is always included. An article picks its writer with `author: Name`.
+  // Each writer with articles gets a page at /authors/<slug>/.
+  authors: [
+    // { name: 'Guest Writer', bio: 'Short bio.', links: [{ label: 'Website', href: 'https://example.com' }] },
+  ],
+
   // Applied to any article that leaves these front-matter fields out.
   defaults: { category: 'Notes', featured: false },
 
@@ -54,6 +70,7 @@ export default {
     { label: 'Topics', href: '/categories/', children: 'categories' },
     { label: 'Tutorials', href: '/categories/tutorials/' },
     { label: 'Research', href: '/categories/research/' },
+    { label: 'Projects', href: '/projects/' }, // hidden until content/projects has something
     { label: 'About', href: '/about/' },
     { label: 'Archive', href: '/archive/' },
   ],
@@ -73,10 +90,14 @@ export default {
       { label: 'About', href: '/about/' },
       { label: 'Archive', href: '/archive/' },
       { label: 'Contact', href: '/contact/' },
+      { label: 'Best of', href: '/best/' },
+      { label: 'Glossary', href: '/glossary/' },
+      { label: 'Reading list', href: '/bookmarks/' },
     ],
     legal: [
       { label: 'Privacy', href: '/privacy/' },
       { label: 'Terms', href: '/terms/' },
+      { label: 'Changelog', href: '/changelog/' },
       { label: 'Sitemap', href: '/sitemap.xml' },
     ],
   },
@@ -98,6 +119,10 @@ export default {
   // ── Sidebar ────────────────────────────────────────────────────────────────
   sidebar: {
     recentCount: 5,
+    best: true, // show a "Best of" list (articles marked best: true) — set false to hide
+    bestTitle: 'Best of',
+    bestCount: 4,
+    newsletter: false, // also show the newsletter form here (needs `newsletter` below)
     showFeatured: false, // also pin the featured article in the sidebar
     promo: {
       title: 'Follow the Writing',
@@ -117,6 +142,8 @@ export default {
       { label: 'Article Search', desc: 'Find anything by title or text', href: '/search/' },
       { label: 'Font Tester', desc: 'Try fonts and reading styles', href: '/font-tester/' },
       { label: 'Tag Explorer', desc: 'Browse the smaller topics', href: '/tags/' },
+      { label: 'Glossary', desc: 'Plain-language definitions', href: '/glossary/' },
+      { label: 'Reading List', desc: 'Articles you saved for later', href: '/bookmarks/' },
     ],
     downloads: [
       { label: 'RSS Feed', href: '/rss.xml' },
@@ -165,6 +192,28 @@ export default {
   //    and copy the ids it shows (repoId, categoryId) here. 3. Set enabled: true.
   // Visitors need a GitHub account to comment. Nothing loads until they press "Load comments".
   comments: { enabled: false, repo: '', repoId: '', category: 'Announcements', categoryId: '', mapping: 'pathname', reactions: true },
+
+  // ── Share, save and print buttons under each article ──────────────────────
+  // targets: x | linkedin | whatsapp | facebook | email
+  share: { enabled: true, targets: ['x', 'linkedin', 'whatsapp', 'email'] },
+
+  // ── Newsletter (optional) ──────────────────────────────────────────────────
+  // The form posts straight to your email service, so no server of your own is needed.
+  //   Buttondown:  provider: 'buttondown', username: 'your-name'
+  //   Mailchimp / others: set `action` to the form address they give you, and `field` to the
+  //   email field name they use (Mailchimp uses 'EMAIL'). Add any hidden fields under `hidden`.
+  newsletter: {
+    enabled: false, provider: '', username: '', action: '', field: 'email', hidden: {},
+    title: 'Get new articles by email', text: 'One email when something new is published. No spam; unsubscribe any time.',
+    button: 'Subscribe', placeholder: 'you@example.com', note: '',
+  },
+
+  // ── Analytics (optional, privacy-friendly, off by default) ─────────────────
+  //   Plausible:    provider: 'plausible',    domain: 'example.com'
+  //   GoatCounter:  provider: 'goatcounter',  code: 'your-code'
+  //   Anything else: provider: 'custom', src: 'https://…/script.js', attrs: { 'data-site': 'id' }
+  // The Privacy page updates itself to say which one you use.
+  analytics: { provider: '', domain: '', code: '', src: '' },
 
   // ── Search & social sharing ────────────────────────────────────────────────
   seo: {

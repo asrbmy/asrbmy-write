@@ -195,4 +195,76 @@
     addEventListener('resize', onScroll);
     update();
   }
+
+  // ── Share, save for later, print ───────────────────────────────────────────
+  const KEY = 'asrbmy-bookmarks';
+  const readList = () => { try { const v = JSON.parse(store.get(KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const shareBar = document.querySelector('.share');
+  if (shareBar) {
+    const status = shareBar.querySelector('.share__status');
+    const say = (t) => { if (status) { status.textContent = t; clearTimeout(say.t); say.t = setTimeout(() => { status.textContent = ''; }, 2500); } };
+    const url = shareBar.dataset.url || location.href;
+    shareBar.querySelector('[data-copy]')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url); say('Link copied'); }
+      catch {
+        const t = document.createElement('textarea'); t.value = url; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+        document.body.append(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch { /* ignore */ } t.remove();
+        say(ok ? 'Link copied' : 'Copy failed. Select the address bar instead.');
+      }
+    });
+    const native = shareBar.querySelector('[data-native]');
+    if (native && navigator.share) {
+      native.hidden = false;
+      native.addEventListener('click', () => { navigator.share({ title: shareBar.dataset.title, url }).catch(() => { /* cancelled */ }); });
+    }
+    shareBar.querySelector('[data-print]')?.addEventListener('click', () => window.print());
+    const bm = shareBar.querySelector('[data-bookmark]');
+    if (bm) {
+      const here = location.pathname;
+      const label = bm.querySelector('span');
+      const draw = () => {
+        const on = readList().some((b) => b.u === here);
+        bm.setAttribute('aria-pressed', String(on));
+        if (label) label.textContent = on ? 'Saved' : 'Save for later';
+        bm.title = on ? 'Press to remove from your reading list' : 'Add to your reading list';
+      };
+      draw();
+      bm.addEventListener('click', () => {
+        let list = readList();
+        if (list.some((b) => b.u === here)) { list = list.filter((b) => b.u !== here); say('Removed from your reading list'); }
+        else { list.unshift({ u: here, t: shareBar.dataset.title || document.title, d: new Date().toISOString().slice(0, 10) }); say('Saved to your reading list'); }
+        store.set(KEY, JSON.stringify(list.slice(0, 200)));
+        draw();
+      });
+    }
+  }
+
+  // ── Click-to-play videos (nothing loads from the video site until pressed) ─
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.video__play');
+    if (!btn) return;
+    const box = btn.closest('.video');
+    const { provider, id, title } = box.dataset;
+    const src = provider === 'vimeo' ? `https://player.vimeo.com/video/${encodeURIComponent(id)}?autoplay=1` : `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`;
+    const f = document.createElement('iframe');
+    f.src = src; f.title = title || 'Video'; f.loading = 'lazy'; f.allowFullscreen = true;
+    f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    f.referrerPolicy = 'strict-origin-when-cross-origin';
+    box.textContent = ''; box.append(f); f.focus();
+  });
+
+  // ── Keep glossary hints inside the screen ──────────────────────────────────
+  const placeHint = (e) => {
+    const a = e.target.closest && e.target.closest('a.gloss');
+    if (!a) return;
+    a.style.removeProperty('--gloss-shift');
+    requestAnimationFrame(() => {
+      const w = parseFloat(getComputedStyle(a, '::after').width) || 0;
+      const left = a.getBoundingClientRect().left;
+      const overflow = left + w - (innerWidth - 12);
+      if (overflow > 0) a.style.setProperty('--gloss-shift', `${-Math.min(overflow, left - 12)}px`);
+    });
+  };
+  document.addEventListener('mouseover', placeHint);
+  document.addEventListener('focusin', placeHint);
 })();

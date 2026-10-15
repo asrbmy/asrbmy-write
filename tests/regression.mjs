@@ -1,5 +1,6 @@
 // Regression tests for security and parsing bugs. Run with: npm run test:unit
 import assert from 'node:assert/strict';
+import { analyticsInfo, newsletterInfo } from '../scripts/features.js';
 import { renderMarkdown, parseFrontmatter, cleanUrl, sanitizeHtml } from '../scripts/markdown.js';
 
 let failed = 0;
@@ -26,5 +27,31 @@ t('headings cannot take the comments/progress ids', () => { for (const id of ['c
 t('duplicate headings get unique ids', () => { const h = html('## Same\n\n## Same'); assert.ok(h.includes('id="same"') && h.includes('id="same-1"')); });
 t('code blocks keep {{braces}}', () => assert.ok(html('```\n{{x}}\n```').includes('{{x}}')));
 t('tables are scroll-wrapped', () => assert.match(html('|a|b|\n|-|-|\n|1|2|'), /table-wrap/));
+
+t('maths render as MathML and plain prices are left alone', () => {
+  const h = html('Cost $5 and $10. Then $x^2$.\n\n$$\n\\frac{a}{b}\n$$');
+  assert.equal((h.match(/<math/g) || []).length, 2); assert.ok(h.includes('$5 and $10'));
+});
+t('broken maths is shown as text, not an error page', () => assert.ok(/math-error|<math/.test(html('$\\frac{$'))));
+t('mermaid blocks become diagram sources and are flagged', () => { const r = renderMarkdown('```mermaid\ngraph TD; A-->B\n```'); assert.ok(r.features.mermaid && r.html.includes('class="mermaid"') && r.html.includes('--&gt;')); });
+t('video embeds are click-to-play placeholders (no iframe)', () => { const r = renderMarkdown('@[youtube](aqz-KE-bpKQ "Demo")'); assert.ok(r.features.video && !/<iframe/.test(r.html) && r.html.includes('data-id="aqz-KE-bpKQ"')); });
+t('video ids cannot inject markup', () => assert.ok(!/onerror|<script/i.test(html('@[youtube](x"><img src=x onerror=alert(1)>)'))));
+t('light/dark picture pairs and srcset', () => {
+  const h = renderMarkdown('![x](/images/a.png)', { images: (src) => (src === '/images/a.png' ? { dark: '/images/a.dark.png', srcset: [{ w: 480, url: '/images/_opt/a-480.webp' }] } : null) }).html;
+  assert.ok(h.includes('img-light') && h.includes('img-dark') && h.includes('480w'));
+});
+t('captioned images are not wrapped in a paragraph', () => assert.ok(!/<p><figure/.test(html('![x](/images/a.png "caption")'))));
+t('unsafe analytics/newsletter addresses are refused', () => {
+  assert.throws(() => analyticsInfo({ analytics: { provider: 'custom', src: 'http://evil.example/x.js' } }));
+  assert.throws(() => analyticsInfo({ analytics: { provider: 'plausible' } }));
+  assert.throws(() => newsletterInfo({ newsletter: { enabled: true, action: 'javascript:alert(1)' } }));
+  assert.equal(analyticsInfo({}), null);
+});
+t('hostile text in every markdown position never yields handlers or scripts', () => {
+  const evil = '"><img src=x onerror=alert(1)><script>alert(1)</script>';
+  const md = `# ${evil}\n\n[${evil}](/x "${evil}")\n\n![${evil}](/a.png "${evil}")\n\n| ${evil} |\n|---|\n| ${evil} |\n\n\`${evil}\`\n\n$$${evil}$$\n\n@[vimeo](${evil})`;
+  const h = renderMarkdown(md).html;
+  assert.ok(!/<script/i.test(h) && !/<[a-z][^>]*\son\w+\s*=/i.test(h), h);
+});
 
 process.exit(failed ? 1 : 0);

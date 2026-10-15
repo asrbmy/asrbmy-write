@@ -5,6 +5,7 @@ date: 2026-06-20
 category: Privacy
 tags: [privacy, security, notes]
 excerpt: Before you pick a privacy tool, work out what you are protecting and from whom. A simple set of questions does most of the work.
+best: true
 ---
 
 Security advice often arrives as a long checklist. A checklist is not a plan, because it does not know what matters to you. A **threat model** is the plan: a short, honest answer to "what could go wrong, and how much do I care?"

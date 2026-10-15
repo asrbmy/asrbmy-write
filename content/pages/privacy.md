@@ -13,9 +13,14 @@ description: Privacy information for this site.
 
 One optional feature keeps a small amount of data **in your own browser only** (using `localStorage`). It is never sent to a server:
 
-- your chosen colour theme (light or dark).
+- your chosen colour theme (light or dark);
+- your reading list, if you use “Save for later”.
 
 You can remove it at any time by clearing the site's data in your browser settings.
+
+## Analytics
+
+{{analytics}}
 
 ## Hosting
 

@@ -5,6 +5,7 @@ date: 2026-07-31
 category: Research
 tags: [research, reading]
 excerpt: A multi-pass approach to research papers that saves hours and helps you decide what deserves a close read.
+best: true
 ---
 
 A single research paper can take hours to read properly, and you rarely need that for every one. Reading in passes lets you stop as soon as you have what you need.

@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFrontmatter, renderMarkdown, htmlToText, esc, slugify, cleanUrl } from './markdown.js';
 import { createTemplates, icon } from './templates.js';
+import { optimiseImages } from './images.js';
+import { analyticsInfo } from './features.js';
 import { tokensCss, resolveTypography } from './tokens.js';
 import { fontPresets, fontFamilies } from '../fonts.config.js';
 
@@ -54,7 +56,82 @@ function coverPath(v, where) {
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) fail(`${where}: "cover" must be a path such as /images/photo.jpg or an https:// address`);
   return '/' + raw.replace(/^(?:\.{0,2}\/)*(?:public\/)?/, '');
 }
-const articles = [];
+// ── Languages ────────────────────────────────────────────────────────────────
+// The first language is the site's main one. Articles in other languages live at /<code>/articles/…
+const languages = Array.isArray(C.languages) && C.languages.length ? C.languages : [{ code: C.language || 'en', label: 'English' }];
+for (const l of languages) if (!/^[a-z]{2,3}(-[A-Za-z0-9]+)*$/.test(String(l.code))) fail(`site.config.js: language code "${l.code}" is not valid (use codes like en, hi, es, pt-BR)`);
+const defaultLang = languages[0].code;
+const langOf = new Map(languages.map((l) => [l.code, l]));
+
+// ── Pictures: smaller copies + light/dark pairs ──────────────────────────────
+const publicImages = path.join(ROOT, 'public/images');
+const cacheDir = path.join(ROOT, '.cache/images');
+const variants = await optimiseImages({ srcDir: publicImages, outDir: cacheDir, quiet: !!process.env.QUIET });
+const imageInfo = (rawSrc) => {
+  let src = rawSrc;
+  try { src = encodeURI(decodeURI(rawSrc)); } catch { /* keep as written */ }
+  const m = src.match(/^\/images\/([^/]+)\.(png|jpe?g|gif|webp|svg)$/i);
+  if (!m) return null;
+  let dark = null;
+  let plain = m[1];
+  try { plain = decodeURIComponent(m[1]); } catch { return null; }
+  if (/[\\/]|\.\./.test(plain)) return null; // never look outside public/images
+  if (!/\.dark$/i.test(m[1])) for (const e of ['png', 'jpg', 'jpeg', 'webp', 'svg']) if (fs.existsSync(path.join(publicImages, `${plain}.dark.${e}`))) { dark = `/images/${m[1]}.dark.${e}`; break; }
+  return { dark, srcset: variants.get(src) };
+};
+
+// ── Glossary (content/glossary.md): "## Term" or "## Term | alias", then the meaning ──
+const glossary = [];
+{
+  const gf = path.join(ROOT, 'content/glossary.md');
+  if (fs.existsSync(gf)) {
+    const { body: gb } = parseFrontmatter(fs.readFileSync(gf, 'utf8'));
+    for (const part of gb.split(/^##[ \t]+/m).slice(1)) {
+      const nl = part.indexOf('\n');
+      const head = (nl < 0 ? part : part.slice(0, nl)).trim();
+      const def = (nl < 0 ? '' : part.slice(nl + 1)).trim();
+      const [term, ...aliases] = head.split('|').map((x) => x.trim()).filter(Boolean);
+      if (!term || !def) continue;
+      const slug = slugify(term);
+      if (!slug) continue;
+      if (glossary.some((g) => g.slug === slug)) fail(`content/glossary.md: "${term}" is defined twice`);
+      const html = renderMarkdown(def, { base }).html;
+      const tip = htmlToText(html);
+      glossary.push({ term, aliases, slug, html, tip: tip.length > 220 ? tip.slice(0, 217).trimEnd() + '…' : tip });
+    }
+    glossary.sort((a, b) => a.term.localeCompare(b.term));
+  }
+}
+const SKIP = new Set(['a', 'code', 'pre', 'button', 'summary', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'math', 'svg', 'script', 'style', 'figcaption']);
+/** Wraps the first mention of each glossary term in a link that shows its meaning on hover or focus. */
+function applyGlossary(html) {
+  if (!glossary.length) return html;
+  const names = glossary.flatMap((g) => [g.term, ...g.aliases].map((n) => ({ n, g }))).sort((a, b) => b.n.length - a.n.length);
+  const used = new Set();
+  let skip = 0;
+  return html.split(/(<[^>]+>)/).map((chunk) => {
+    if (chunk.startsWith('<')) {
+      const m = chunk.match(/^<(\/?)([a-zA-Z0-9]+)/);
+      if (m && SKIP.has(m[2].toLowerCase()) && !/\/>$/.test(chunk)) skip += m[1] ? -1 : 1;
+      return chunk;
+    }
+    if (skip > 0 || !chunk.trim()) return chunk;
+    const live = names.filter(({ g }) => !used.has(g.slug));
+    if (!live.length) return chunk;
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_-])(${live.map(({ n }) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}_-])`, 'iu');
+    let out = '', rest = chunk, hit;
+    while ((hit = re.exec(rest))) {
+      const g = live.find(({ n }) => n.toLowerCase() === hit[1].toLowerCase())?.g;
+      if (!g || used.has(g.slug)) { out += rest.slice(0, hit.index + hit[0].length); rest = rest.slice(hit.index + hit[0].length); continue; }
+      used.add(g.slug);
+      out += `${rest.slice(0, hit.index)}<a class="gloss" href="${u(`/glossary/#g-${g.slug}`)}" data-def="${esc(g.tip)}">${hit[1]}<span class="sr-only"> (definition: ${esc(g.tip)})</span></a>`;
+      rest = rest.slice(hit.index + hit[0].length);
+    }
+    return out + rest;
+  }).join('');
+}
+
+const allArticles = [];
 for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') && !f.startsWith('.')).sort()) {
   const src = fs.readFileSync(path.join(articleDir, file), 'utf8');
   const { data: fm, body } = parseFrontmatter(src);
@@ -70,12 +147,16 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') &&
   if (!slugify(category)) fail(`${where}: category "${category}" needs at least one letter or number`);
   const rawTags = Array.isArray(fm.tags) ? fm.tags : String(fm.tags || '').split(',');
   const tags = [...new Set(rawTags.map((t) => String(t).trim()).filter((t) => slugify(t)))];
-  const { html, toc } = renderMarkdown(body, { base });
-  const text = htmlToText(html);
+  const lang = String(fm.lang || defaultLang);
+  if (!langOf.has(lang)) fail(`${where}: lang "${lang}" is not listed under "languages" in site.config.js`);
+  const { html: rawHtml, toc, features } = renderMarkdown(body, { base, images: imageInfo });
+  const html = fm.glossary === false || lang !== defaultLang ? rawHtml : applyGlossary(rawHtml);
+  const text = htmlToText(rawHtml.replace(/<math[\s\S]*?<\/math>/g, ' '));
   const firstPara = htmlToText((html.match(/<p>([\s\S]*?)<\/p>/) || [, ''])[1]);
   const excerpt = String(fm.excerpt || (firstPara.length > 180 ? firstPara.slice(0, 177).trimEnd() + '…' : firstPara));
-  articles.push({
-    file, slug, url: `/articles/${slug}/`, title: String(fm.title), subtitle: fm.subtitle ? String(fm.subtitle) : '',
+  allArticles.push({
+    file, slug, lang, translationOf: fm.translationOf ? slugify(String(fm.translationOf)) : '', features, best: fm.best === true,
+    url: lang === defaultLang ? `/articles/${slug}/` : `/${lang}/articles/${slug}/`, title: String(fm.title), subtitle: fm.subtitle ? String(fm.subtitle) : '',
     date: String(fm.date), updated: fm.updated ? String(fm.updated) : '',
     author: String(fm.author || defaults.author), category, tags, featured: fm.featured === true,
     excerpt, html, toc, text,
@@ -86,11 +167,53 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') &&
   });
 }
 const slugs = new Set();
-for (const a of articles) {
-  if (slugs.has(a.slug)) fail(`Duplicate article slug "${a.slug}" (${a.file})`);
-  slugs.add(a.slug);
+for (const a of allArticles) {
+  if (slugs.has(a.lang + '/' + a.slug)) fail(`Duplicate article slug "${a.slug}" (${a.file})`);
+  slugs.add(a.lang + '/' + a.slug);
 }
-articles.sort((a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
+allArticles.sort((a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
+// `articles` is the main-language list that feeds the home page, listings, tags, search and feeds.
+const articles = allArticles.filter((a) => a.lang === defaultLang);
+const translations = allArticles.filter((a) => a.lang !== defaultLang);
+for (const t of translations) if (t.translationOf && !articles.some((a) => a.slug === t.translationOf)) console.warn(`! ${t.file}: translationOf "${t.translationOf}" matches no ${defaultLang} article`);
+for (const a of allArticles) {
+  const key = a.lang === defaultLang ? a.slug : a.translationOf;
+  a.alternates = key ? allArticles.filter((b) => b !== a && (b.lang === defaultLang ? b.slug : b.translationOf) === key) : [];
+}
+
+// ── Authors ──────────────────────────────────────────────────────────────────
+const authorProfiles = [];
+for (const p of [{ name: C.author?.name, bio: C.author?.bio, links: C.author?.links }, ...(C.authors || [])]) {
+  if (!p?.name) continue;
+  const slug = slugify(p.slug || p.name);
+  if (slug && !authorProfiles.some((x) => x.slug === slug)) authorProfiles.push({ ...p, slug, links: p.links || [] });
+}
+for (const a of allArticles) { a.authorProfile = authorProfiles.find((p) => p.slug === slugify(a.author)) || null; }
+const authorList = authorProfiles.map((p) => ({ ...p, articles: articles.filter((a) => a.authorProfile === p) })).filter((p) => p.articles.length);
+const bestList = articles.filter((a) => a.best);
+
+// ── Projects (content/projects/*.md) ─────────────────────────────────────────
+const projects = [];
+{
+  const dir = path.join(ROOT, 'content/projects');
+  for (const file of fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('.')).sort() : []) {
+    const { data: fm, body } = parseFrontmatter(fs.readFileSync(path.join(dir, file), 'utf8'));
+    const where = `content/projects/${file}`;
+    if (!fm.title) fail(`${where}: missing "title"`);
+    const slug = slugify(fm.slug || file.replace(/\.md$/, ''));
+    if (!slug) fail(`${where}: could not make a URL slug`);
+    const link = (v, key) => { if (!v) return ''; const c = cleanUrl(String(v)); if (c === null || !/^https?:\/\//i.test(c)) fail(`${where}: "${key}" must be an https:// address`); return c; };
+    if (fm.draft === true && !includeDrafts) continue;
+    projects.push({
+      slug, url: `/projects/${slug}/`, title: String(fm.title), summary: String(fm.summary || ''), status: String(fm.status || ''),
+      tech: Array.isArray(fm.tags || fm.tech) ? (fm.tags || fm.tech) : String(fm.tech || '').split(',').map((x) => x.trim()).filter(Boolean),
+      link: link(fm.url, 'url'), repo: link(fm.repo, 'repo'), cover: coverPath(fm.cover, where), coverAlt: fm.coverAlt ? String(fm.coverAlt) : '',
+      order: Number.isFinite(Number(fm.order)) && fm.order !== undefined && fm.order !== '' ? Number(fm.order) : 999, date: String(fm.date || ''),
+      html: renderMarkdown(body, { base, images: imageInfo }).html,
+    });
+  }
+  projects.sort((a, b) => a.order - b.order || b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
+}
 
 // ── Taxonomies ───────────────────────────────────────────────────────────────
 const catSlug = (n) => slugify(n);
@@ -144,6 +267,11 @@ const hasRoute = (href) => {
   let m;
   if ((m = href.match(/^\/categories\/([^/]+)\/?$/))) return categories.some((c) => c.slug === m[1]);
   if ((m = href.match(/^\/tags\/([^/]+)\/?$/))) return tags.some((t) => t.slug === m[1]);
+  if (href === '/best/') return bestList.length > 0;
+  if (href === '/projects/') return projects.length > 0;
+  if (href === '/glossary/') return glossary.length > 0;
+  if (href === '/series/') return seriesList.length > 0;
+  if (href === '/authors/') return authorList.length > 1;
   return true;
 };
 
@@ -151,7 +279,7 @@ const hasRoute = (href) => {
 const sha = (x) => crypto.createHash('sha1').update(x).digest('hex').slice(0, 8);
 const assetVer = {
   'tokens.css': sha(tokensCss(C)),
-  ...Object.fromEntries(['theme.css', 'site.js', 'font-tester.js', 'comments.js'].map((f) => [f, sha(fs.readFileSync(path.join(ROOT, 'src', f)))])),
+  ...Object.fromEntries(['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js'].map((f) => [f, sha(fs.readFileSync(path.join(ROOT, 'src', f)))])),
 };
 const asset = (name) => `${u(`/assets/${name}`)}?v=${assetVer[name]}`;
 const searchIndexJson = JSON.stringify(articles.map((a) => ({ t: a.title, u: u(a.url), c: a.category, g: a.tags, e: a.excerpt, d: a.date, r: a.readingTime, x: a.text })));
@@ -168,8 +296,9 @@ const socialForTemplate = (C.social || [])
   .filter((s) => s.href);
 
 const imgSrc = (c) => (/^https:/i.test(c) ? c : u(c));
-const S = { imgSrc, seriesList, config: C, base, siteUrl, u, abs, asset, fmtDate, articles, categories, tags, catSlug, tagSlug, hasRoute, social: socialForTemplate };
-const T = createTemplates(S);
+const S = { allArticles, translations, languages, defaultLang, langOf, authorList, bestList, glossary, projects, imgSrc, seriesList, config: C, base, siteUrl, u, abs, asset, fmtDate, articles, categories, tags, catSlug, tagSlug, hasRoute, social: socialForTemplate };
+let T;
+try { T = createTemplates(S); } catch (e) { fail(e.message); }
 
 // ── Output helpers ───────────────────────────────────────────────────────────
 fs.rmSync(DIST, { recursive: true, force: true });
@@ -249,11 +378,13 @@ ${panelHead({ kicker: 'Category', title: c.name, lede: esc(c.description || `${c
   }
 }
 
-// ── Tags ─────────────────────────────────────────────────────────────────────
+// ── Tags (shown as a weighted cloud: the more articles, the bigger the tag) ──
+const weight = (n) => { const max = Math.max(...tags.map((t) => t.count), 1); return n <= 1 ? 1 : Math.min(5, 1 + Math.ceil((n / max) * 4 - 0.01)); };
+// ──────────────────────────────────────────────────────────────────────────────
 {
   const body = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Browse by tag', title: 'Tags', lede: 'Smaller topics that cut across categories.' })}
-<ul class="chips chips--lg">${tags.map((t) => `<li><a href="${u(`/tags/${t.slug}/`)}">${esc(t.name)} <span>${t.count}</span></a></li>`).join('')}</ul>
+<ul class="chips chips--lg chips--cloud">${tags.map((t) => `<li class="w${weight(t.count)}"><a href="${u(`/tags/${t.slug}/`)}">${esc(t.name)} <span>${t.count}</span></a></li>`).join('')}</ul>
 </section>`;
   emit('/tags/', T.page({ title: 'Tags', path: u('/tags/'), body, crumbs: [homeCrumb, { label: 'Tags' }], description: `All tags used on ${C.name}.` }));
   for (const t of tags) {
@@ -301,7 +432,7 @@ ${panelHead({ kicker: 'Find an article', title: 'Search', lede: 'Searches titles
 }
 
 // ── Static pages from content/pages ──────────────────────────────────────────
-const pageVars = { name: C.name, author: C.author?.name || '', bio: C.author?.bio || '', description: C.description, tagline: C.tagline, url: siteUrl };
+const pageVars = { analytics: (() => { try { return analyticsInfo(C)?.note || 'This site does not use analytics, advertising or tracking scripts.'; } catch (e) { return fail(e.message); } })(), name: C.name, author: C.author?.name || '', bio: C.author?.bio || '', description: C.description, tagline: C.tagline, url: siteUrl };
 const pagesDir = path.join(ROOT, 'content/pages');
 for (const file of fs.existsSync(pagesDir) ? fs.readdirSync(pagesDir).filter((f) => f.endsWith('.md')) : []) {
   const { data: fm, body: md } = parseFrontmatter(fs.readFileSync(path.join(pagesDir, file), 'utf8'));
@@ -367,17 +498,20 @@ ${panelHead({ kicker: 'Typography', title: 'Font Tester', lede: 'Try heading and
 
 // ── Articles ─────────────────────────────────────────────────────────────────
 function related(a) {
-  return articles
-    .filter((b) => b !== a)
+  return allArticles
+    .filter((b) => b !== a && b.lang === a.lang)
     .map((b) => ({ b, score: (b.category === a.category ? 3 : 0) + b.tags.filter((t) => a.tags.includes(t)).length }))
     .filter((x) => x.score > 0)
     .sort((x, y) => y.score - x.score || y.b.date.localeCompare(x.b.date))
     .slice(0, 3)
     .map((x) => x.b);
 }
-articles.forEach((a, i) => {
-  const newer = articles[i - 1];
-  const older = articles[i + 1];
+allArticles.forEach((a) => {
+  const sameLang = allArticles.filter((b) => b.lang === a.lang);
+  const newer = sameLang[sameLang.indexOf(a) - 1];
+  const older = sameLang[sameLang.indexOf(a) + 1];
+  const authorPage = a.authorProfile && authorList.some((x) => x.slug === a.authorProfile.slug) ? `/authors/${a.authorProfile.slug}/` : '';
+  const langLinks = a.alternates.length ? `<p class="langs"><span>${a.lang === defaultLang ? 'Also available in' : 'Other languages'}:</span> ${a.alternates.map((x) => `<a href="${u(x.url)}" hreflang="${esc(x.lang)}" lang="${esc(x.lang)}">${esc(langOf.get(x.lang)?.label || x.lang)}</a>`).join(' · ')}</p>` : '';
   const rel = related(a);
   const si = a.seriesInfo;
   const series = si ? `<details class="series" id="series-box" open>
@@ -402,8 +536,9 @@ articles.forEach((a, i) => {
     <h1 class="title">${esc(a.title)}</h1>
     ${a.cover ? `<figure class="cover"><img src="${esc(S.imgSrc(a.cover))}" alt="${esc(a.coverAlt)}" width="1200" height="630" decoding="async" fetchpriority="high"></figure>` : ''}
     ${a.subtitle || a.excerpt ? `<p class="lede">${esc(a.subtitle || a.excerpt)}</p>` : ''}
+    ${langLinks}
     <div class="byline">
-      <span class="byline__item">${esc(a.author)}</span>
+      <span class="byline__item">${authorPage ? `<a href="${u(authorPage)}" rel="author">${esc(a.author)}</a>` : esc(a.author)}</span>
       <span class="byline__item"><time datetime="${a.date}">${fmtDate(a.date)}</time></span>
       <span class="byline__item">${a.readingTime} min read</span>
       ${a.updated ? `<span class="byline__item">Updated <time datetime="${a.updated}">${fmtDate(a.updated)}</time></span>` : ''}
@@ -414,6 +549,8 @@ articles.forEach((a, i) => {
   ${series}
   ${toc}
   <div class="prose">${a.html}</div>
+  ${T.shareBar(a)}
+  ${T.hasNewsletter ? T.newsletterForm('article') : ''}
   ${comments}
   ${rel.length ? `<aside class="related" aria-labelledby="h-related"><h2 id="h-related">Related Articles</h2><ul>${rel.map((r) => `<li><a href="${u(r.url)}">${esc(r.title)}</a><span>${esc(r.category)} · ${r.readingTime} min read</span></li>`).join('')}</ul></aside>` : ''}
   <nav class="prevnext" aria-label="More articles">
@@ -423,19 +560,114 @@ articles.forEach((a, i) => {
 </article>`;
   emit(a.url, T.page({
     title: a.title, path: u(a.url), body, description: a.excerpt, bodyClass: `is-article${sideToc ? ' has-side-toc' : ''}`,
-    progress: true, sideExtra: sideToc, ogImage: a.cover || undefined, scripts: commentsOn ? ['comments.js'] : [],
+    progress: true, sideExtra: sideToc, ogImage: a.cover || undefined, lang: a.lang, features: a.features,
+    alternates: [a, ...a.alternates], scripts: [...(commentsOn ? ['comments.js'] : []), ...(a.features.mermaid ? ['diagrams.js'] : [])],
     article: { published: a.date, modified: a.updated || a.date, section: a.category, tags: a.tags },
     crumbs: [homeCrumb, { label: 'Writing', href: '/writing/' }, { label: a.title }],
     jsonld: {
       '@context': 'https://schema.org', '@type': 'BlogPosting', headline: a.title, description: a.excerpt,
-      datePublished: a.date, dateModified: a.updated || a.date, author: { '@type': 'Person', name: a.author },
+      datePublished: a.date, dateModified: a.updated || a.date, author: { '@type': 'Person', name: a.author, ...(authorPage ? { url: abs(u(authorPage)) } : {}) }, inLanguage: a.lang,
       mainEntityOfPage: { '@type': 'WebPage', '@id': abs(u(a.url)) }, keywords: a.tags.join(', '), articleSection: a.category,
-      wordCount: a.text.split(/\s+/).length, inLanguage: C.language, image: a.cover ? abs(S.imgSrc(a.cover)) : abs(u(C.seo?.ogImage || '/og-default.png')),
+      wordCount: a.text.split(/\s+/).length, image: a.cover ? abs(S.imgSrc(a.cover)) : abs(u(C.seo?.ogImage || '/og-default.png')),
       ...(si ? { isPartOf: { '@type': 'CreativeWorkSeries', name: si.name, url: abs(u(`/series/${si.slug}/`)) }, position: si.index + 1 } : {}),
       publisher: { '@type': 'Organization', name: C.name, logo: { '@type': 'ImageObject', url: abs(u('/icon-512.png')) } },
     },
   }));
 });
+
+// ── Best of ──────────────────────────────────────────────────────────────────
+if (bestList.length) {
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Start here', title: 'Best of', lede: 'The articles worth reading first.' })}
+<div class="cards">${bestList.map((a) => T.articleCard(a)).join('')}</div>
+</section>`;
+  emit('/best/', T.page({ title: 'Best of', path: u('/best/'), body, crumbs: [homeCrumb, { label: 'Best of' }], description: `The best articles on ${C.name}, chosen by the author.` }));
+}
+
+// ── Authors ──────────────────────────────────────────────────────────────────
+if (authorList.length) {
+  const linkRows = (p) => (p.links || []).filter((l) => l.href && /^https?:\/\//i.test(l.href)).map((l) => `<li><a href="${esc(l.href)}" rel="me noopener noreferrer" target="_blank">${esc(l.label || l.href)}</a></li>`).join('');
+  if (authorList.length > 1) {
+    const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'The writers', title: 'Authors', lede: 'Everyone who writes here.' })}
+<ul class="catgrid">${authorList.map((p) => `<li><a href="${u(`/authors/${p.slug}/`)}"><span class="catgrid__name">${esc(p.name)}</span><span class="count">${p.articles.length}</span><span class="catgrid__desc">${esc(p.bio || '')}</span></a></li>`).join('')}</ul>
+</section>`;
+    emit('/authors/', T.page({ title: 'Authors', path: u('/authors/'), body, crumbs: [homeCrumb, { label: 'Authors' }], description: `The writers at ${C.name}.` }));
+  }
+  for (const p of authorList) {
+    const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Author', title: p.name, lede: esc(p.bio || `${p.articles.length} article${p.articles.length === 1 ? '' : 's'} by ${p.name}.`) })}
+${linkRows(p) ? `<ul class="chips author__links">${linkRows(p)}</ul>` : ''}
+<div class="cards">${p.articles.map((a) => T.articleCard(a)).join('')}</div>
+</section>`;
+    emit(`/authors/${p.slug}/`, T.page({
+      title: p.name, path: u(`/authors/${p.slug}/`), body, description: p.bio || `Articles by ${p.name}.`,
+      crumbs: [homeCrumb, ...(authorList.length > 1 ? [{ label: 'Authors', href: '/authors/' }] : []), { label: p.name }],
+      jsonld: { '@context': 'https://schema.org', '@type': 'ProfilePage', mainEntity: { '@type': 'Person', name: p.name, description: p.bio || '', url: abs(u(`/authors/${p.slug}/`)), sameAs: (p.links || []).map((l) => l.href).filter((h) => /^https?:/i.test(h || '')) } },
+    }), { sitemap: authorList.length > 1 });
+  }
+}
+
+// ── Glossary ─────────────────────────────────────────────────────────────────
+if (glossary.length) {
+  const firstOf = new Map();
+  for (const g of glossary) { const L = g.term[0].toUpperCase(); if (!firstOf.has(L)) firstOf.set(L, g.slug); }
+  const letters = [...firstOf.keys()];
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Plain-language definitions', title: 'Glossary', lede: 'Terms used in the articles. In an article, the first mention of each is underlined; hover or focus it for the meaning.' })}
+<nav class="az" aria-label="Jump to letter">${letters.map((l) => `<a href="#g-${esc(firstOf.get(l))}">${esc(l)}</a>`).join('')}</nav>
+<dl class="glossary">${glossary.map((g) => `<dt id="g-${g.slug}">${esc(g.term)}${g.aliases.length ? ` <small>also: ${esc(g.aliases.join(', '))}</small>` : ''}</dt><dd>${g.html}</dd>`).join('')}</dl>
+</section>`;
+  emit('/glossary/', T.page({ title: 'Glossary', path: u('/glossary/'), body, crumbs: [homeCrumb, { label: 'Glossary' }], description: `Definitions of the terms used on ${C.name}.`,
+    jsonld: { '@context': 'https://schema.org', '@type': 'DefinedTermSet', name: `${C.name} glossary`, hasDefinedTerm: glossary.map((g) => ({ '@type': 'DefinedTerm', name: g.term, description: g.tip })) } }));
+}
+
+// ── Projects ─────────────────────────────────────────────────────────────────
+if (projects.length) {
+  const links = (p) => `${p.link ? `<a class="btn" href="${esc(p.link)}" rel="noopener noreferrer" target="_blank">Visit</a>` : ''}${p.repo ? `<a class="btn btn--ghost" href="${esc(p.repo)}" rel="noopener noreferrer" target="_blank">Source code</a>` : ''}`;
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Things I have built', title: 'Projects', lede: 'Tools, experiments and longer pieces of work.' })}
+<div class="projects">${projects.map((p) => `<article class="project">
+  ${p.cover ? `<a class="project__cover" href="${u(p.url)}" tabindex="-1" aria-hidden="true"><img src="${esc(imgSrc(p.cover))}" alt="" width="1200" height="630" loading="lazy" decoding="async"></a>` : ''}
+  <h2 class="project__title"><a href="${u(p.url)}">${esc(p.title)}</a>${p.status ? ` <span class="chip">${esc(p.status)}</span>` : ''}</h2>
+  <p>${esc(p.summary)}</p>
+  ${p.tech.length ? `<ul class="chips">${p.tech.map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ul>` : ''}
+</article>`).join('')}</div>
+</section>`;
+  emit('/projects/', T.page({ title: 'Projects', path: u('/projects/'), body, crumbs: [homeCrumb, { label: 'Projects' }], description: `Projects by ${C.author?.name || C.name}.` }));
+  for (const p of projects) {
+    const b = `<article class="panel panel--top">
+${panelHead({ kicker: p.status ? esc(p.status) : 'Project', title: p.title, lede: esc(p.summary) })}
+${p.cover ? `<figure class="cover"><img src="${esc(imgSrc(p.cover))}" alt="${esc(p.coverAlt)}" width="1200" height="630" decoding="async"></figure>` : ''}
+${p.tech.length ? `<ul class="chips">${p.tech.map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ul>` : ''}
+<div class="prose">${p.html}</div>
+<p class="project__links">${links(p)}</p>
+</article>`;
+    emit(p.url, T.page({ title: p.title, path: u(p.url), body: b, crumbs: [homeCrumb, { label: 'Projects', href: '/projects/' }, { label: p.title }], description: p.summary || `${p.title} — a project by ${C.author?.name || C.name}.` }));
+  }
+}
+
+// ── Reading list (saved in the reader's own browser) ─────────────────────────
+{
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Saved on this device', title: 'Reading list', lede: 'Articles you saved with “Save for later”. The list lives only in this browser; nothing is sent anywhere.' })}
+<div id="bookmarks" data-home="${esc(u('/writing/'))}" aria-live="polite"><p>Loading…</p></div>
+<noscript><p>The reading list needs JavaScript. Your saved articles stay in this browser.</p></noscript>
+</section>`;
+  emit('/bookmarks/', T.page({ title: 'Reading list', path: u('/bookmarks/'), body, crumbs: [homeCrumb, { label: 'Reading list' }], description: 'Articles saved to read later.', noindex: true, scripts: ['bookmarks.js'] }), { sitemap: false });
+}
+
+// ── Other languages ──────────────────────────────────────────────────────────
+for (const l of languages.slice(1)) {
+  const list = translations.filter((a) => a.lang === l.code);
+  if (!list.length) continue;
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: esc(l.label), title: l.label, lede: `${list.length} article${list.length === 1 ? '' : 's'} in ${esc(l.label)}.` })}
+<div class="cards">${list.map((a) => T.articleCard(a)).join('')}</div>
+</section>`;
+  emit(`/${l.code}/`, T.page({ title: l.label, path: u(`/${l.code}/`), body, lang: l.code, crumbs: [homeCrumb, { label: l.label }], description: `${C.name} in ${l.label}.`,
+    alternates: [{ lang: defaultLang, url: '/' }, ...languages.slice(1).filter((x) => translations.some((a) => a.lang === x.code)).map((x) => ({ lang: x.code, url: `/${x.code}/` }))] }));
+}
 
 // ── Series pages ─────────────────────────────────────────────────────────────
 if (seriesList.length) {
@@ -493,7 +725,7 @@ ${items}
   fs.writeFileSync(path.join(DIST, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${emitted.map((p) => {
-    const a = articles.find((x) => x.url === p);
+    const a = allArticles.find((x) => x.url === p);
     return `  <url><loc>${esc(abs(u(p)))}</loc>${a ? `<lastmod>${a.updated || a.date}</lastmod>` : latest ? `<lastmod>${latest}</lastmod>` : ''}</url>`;
   }).join('\n')}
 </urlset>
@@ -511,7 +743,15 @@ ${emitted.map((p) => {
 {
   fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(DIST, 'assets/tokens.css'), tokensCss(C));
-  for (const f of ['theme.css', 'site.js', 'font-tester.js', 'comments.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
+  for (const f of ['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
+  // Diagram library: only shipped when an article actually uses a ```mermaid block
+  if (allArticles.some((a) => a.features.mermaid)) {
+    const src = path.join(ROOT, 'node_modules/mermaid/dist/mermaid.min.js');
+    if (!fs.existsSync(src)) fail('An article uses a mermaid diagram but the "mermaid" package is not installed. Run npm install.');
+    fs.mkdirSync(path.join(DIST, 'assets/vendor'), { recursive: true });
+    fs.copyFileSync(src, path.join(DIST, 'assets/vendor/mermaid.min.js'));
+  }
+  if (fs.existsSync(path.join(cacheDir, '_opt'))) fs.cpSync(path.join(cacheDir, '_opt'), path.join(DIST, 'images/_opt'), { recursive: true });
   if (fs.existsSync(path.join(ROOT, 'public'))) fs.cpSync(path.join(ROOT, 'public'), DIST, { recursive: true });
 }
 

@@ -2,3 +2,4 @@ node_modules/
 dist/
 writer/.trash/
 .DS_Store
+.cache/
