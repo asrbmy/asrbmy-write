@@ -4,7 +4,7 @@ import { esc } from './markdown.js';
 import { analyticsInfo, newsletterInfo } from './features.js';
 
 // Runs before the page paints so a saved dark/light choice never flashes. Its hash is allowed in the CSP.
-const THEME_SCRIPT = "try{var t=localStorage.getItem('asrbmy-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}";
+const THEME_SCRIPT = "try{var d=document.documentElement,t=localStorage.getItem('asrbmy-theme');if(t==='dark'||t==='light')d.setAttribute('data-theme',t);var r=JSON.parse(localStorage.getItem('asrbmy-reader')||'{}');['rs','rw','rf','rc'].forEach(function(k){if(/^[a-z]{2,8}$/.test(r[k]||''))d.setAttribute('data-'+k,r[k])})}catch(e){}";
 const THEME_HASH = `'sha256-${crypto.createHash('sha256').update(THEME_SCRIPT).digest('base64')}'`;
 
 const ICONS = {
@@ -21,6 +21,8 @@ const ICONS = {
   share: '<path d="M8 10V2M5 5l3-3 3 3M3 9v4.500h10V9" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linecap="round" stroke-linejoin="round"/>',
   bookmark: '<path d="M3.500 1.500h9v13L8 11l-4.500 3.500z" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linejoin="round"/>',
   print: '<path d="M4 6V1.500h8V6M4 11.500H1.500V6h13v5.500H12M4 9.500h8v5H4z" fill="none" stroke="currentColor" stroke-width="1.300" stroke-linejoin="round"/>',
+  text: '<path d="M1.500 13 5.500 3l4 10M2.800 9.500h5.400M10.500 13l2.300-5.500 2.200 5.500M11.300 11.500h3" fill="none" stroke="currentColor" stroke-width="1.400" stroke-linecap="round" stroke-linejoin="round"/>',
+  dice: '<rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.300"/><circle cx="5.500" cy="5.500" r="1" fill="currentColor"/><circle cx="10.500" cy="10.500" r="1" fill="currentColor"/><circle cx="8" cy="8" r="1" fill="currentColor"/>',
   rss: '<path d="M2 2.500a11.500 11.500 0 0 1 11.500 11.500M2 7a7 7 0 0 1 7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="3" cy="13" r="1.4" fill="currentColor"/>',
 };
 export const icon = (name, size = 16) =>
@@ -39,7 +41,7 @@ export function createTemplates(S) {
       : '';
 
   const metaLine = (a) =>
-    `<p class="meta"><time datetime="${a.date}">${S.fmtDate(a.date)}</time><span aria-hidden="true">·</span><span>${a.readingTime} min read</span></p>`;
+    `<p class="meta"><time datetime="${a.date}">${S.fmtDate(a.date)}</time><span aria-hidden="true">·</span><span>${a.readingTime} min read</span>${a.status ? `<span class="chip chip--warn">${a.status === 'draft' ? 'Draft' : 'Scheduled'}</span>` : ''}</p>`;
 
   // `level` is the heading level of the card title — 2 under a page <h1>, 3 under a section <h2>.
   function articleCard(a, { featured = false, level = 2 } = {}) {
@@ -102,12 +104,27 @@ export function createTemplates(S) {
     </a>
     <div class="header__actions">
       ${(C.headerActions || []).map((a) => `<a class="btn-ghost${a.accent ? ' btn-ghost--accent' : ''}" href="${u(a.href)}">${esc(a.label)} ${icon('arrow', 14)}</a>`).join('\n      ')}
+      ${C.reader?.enabled === false ? '' : `<button type="button" class="icon-btn" id="reader-btn" aria-label="Reading settings" aria-expanded="false" aria-controls="reader-panel" hidden>${icon('text', 18)}</button>`}
       <button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch colour theme" aria-pressed="false">${icon('moon', 16)}</button>
       <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">${icon('menu', 18)}</button>
     </div>
   </div>
 </header>
-<div class="navbar"><div class="wrap">${nav(path)}</div></div>`;
+<div class="navbar"><div class="wrap">${nav(path)}</div></div>${C.reader?.enabled === false ? '' : readerPanel()}`;
+  }
+
+  // ── Reading settings (text size, width, font, contrast) — saved in the reader's browser ──
+  function readerPanel() {
+    const group = (id, label, opts) => `<fieldset class="reader__group"><legend>${label}</legend><div class="seg">${opts.map(([v, t, hint], i) =>
+      `<label class="seg__opt"><input type="radio" name="${id}" value="${v}"${i === 0 ? ' checked' : ''}><span${hint ? ` title="${esc(hint)}"` : ''}>${t}</span></label>`).join('')}</div></fieldset>`;
+    return `<div class="reader" id="reader-panel" role="dialog" aria-label="Reading settings" hidden>
+  <div class="reader__head"><strong>Reading settings</strong><button type="button" class="reader__close" id="reader-close" aria-label="Close reading settings">×</button></div>
+  ${group('rs', 'Text size', [['md', 'Normal'], ['lg', 'Large'], ['xl', 'Larger'], ['sm', 'Small']])}
+  ${group('rw', 'Line width', [['full', 'Full'], ['medium', 'Medium'], ['narrow', 'Narrow']])}
+  ${group('rf', 'Font', [['site', 'Site font'], ['sans', 'Easy-read', 'Atkinson Hyperlegible, designed for low vision'], ['dys', 'Dyslexia-friendly', 'OpenDyslexic']])}
+  ${group('rc', 'Contrast', [['normal', 'Normal'], ['high', 'High']])}
+  <p class="reader__foot"><button type="button" class="btn btn--ghost" id="reader-reset">Reset</button><span>Saved on this device only.</span></p>
+</div>`;
   }
 
   // ── Newsletter form ────────────────────────────────────────────────────────
@@ -164,6 +181,10 @@ export function createTemplates(S) {
     <ul class="side-recent">${best.map((a) => `<li><a href="${u(a.url)}">${esc(a.title)}</a><span class="side-recent__meta">${esc(a.category)} · ${a.readingTime} min</span></li>`).join('')}</ul>
     <p class="more"><a href="${u('/best/')}">See all ${icon('arrow', 14)}</a></p>
   </section>` : '';
+    const popBlock = S.popular ? `<section class="side-block">
+    <h2 class="side-title">${esc(S.popular.title)}</h2>
+    <ol class="side-recent side-popular">${S.popular.list.map((a) => `<li><a href="${u(a.url)}">${esc(a.title)}</a><span class="side-recent__meta">${esc(a.category)} · ${a.readingTime} min</span></li>`).join('')}</ol>
+  </section>` : '';
     return `<aside class="sidebar" aria-label="Sidebar">
     ${extra}
   <section class="side-block">
@@ -198,6 +219,7 @@ export function createTemplates(S) {
     <h2 class="side-title side-title--lg">${esc(sb.toolsTitle || 'Tools')}</h2>
     <ul class="side-tools">${sb.tools.filter((t) => S.hasRoute(t.href)).map((t) => `<li><a href="${u(t.href)}"><span class="side-tools__text"><strong>${esc(t.label)}</strong><small>${esc(t.desc || '')}</small></span><span class="badge">Tool</span></a></li>`).join('')}</ul>
   </section>` : ''}
+  ${popBlock}
   ${bestBlock}
   ${newsletter && sb.newsletter ? `<section class="side-block">${newsletterForm('side')}</section>` : ''}
   ${(sb.downloads || []).length ? `<section class="side-block">
@@ -266,10 +288,10 @@ export function createTemplates(S) {
       'style-src': ["'self'", ...(f.mermaid ? ["'unsafe-inline'"] : [])], // diagrams draw with inline styles
       'img-src': [sec.imgSrc || "'self' data: https:"],
       'font-src': ["'self'"],
-      'connect-src': ["'self'", ...(analytics?.connect || [])],
+      'connect-src': ["'self'", ...(analytics?.connect || []), ...(S.views?.views ? [S.views.origin] : [])],
       'frame-src': [...(cm ? ['https://giscus.app'] : []), ...(f.video ? ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'] : [])],
       'manifest-src': ["'self'"],
-      'form-action': ["'self'", ...(newsletter ? [newsletter.origin] : [])],
+      'form-action': ["'self'", ...(newsletter ? [newsletter.origin] : []), ...(o.formOrigins || [])],
       'base-uri': ["'self'"],
       'object-src': ["'none'"],
     };
@@ -280,7 +302,7 @@ export function createTemplates(S) {
     const alt = o.alternates || [];
     const mainAlt = alt.find((x) => x.lang === S.defaultLang);
     const alternates = [...alt, ...(mainAlt ? [{ lang: 'x-default', url: mainAlt.url }] : [])].map((x) => `<link rel="alternate" hreflang="${esc(x.lang)}" href="${esc(S.abs(u(x.url)))}">`).join('\n');
-    const robots = o.noindex ? 'noindex,follow' : 'index,follow,max-image-preview:large,max-snippet:-1';
+    const robots = o.noindex || S.includeDrafts ? 'noindex,follow' : 'index,follow,max-image-preview:large,max-snippet:-1';
     const a = o.article;
     const ld = [...(o.jsonld ? (Array.isArray(o.jsonld) ? o.jsonld : [o.jsonld]) : [])];
     if (o.crumbs && o.crumbs.length > 1) {
@@ -328,6 +350,7 @@ ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="${u(C.logo.favicon)}">
 <link rel="apple-touch-icon" href="${u('/apple-touch-icon.png')}">
 <link rel="manifest" href="${u('/manifest.webmanifest')}">
+${S.offline ? `<meta name="asrbmy-sw" content="${esc(u('/sw.js'))}" data-scope="${esc(u('/'))}">` : ''}
 <link rel="alternate" type="application/rss+xml" title="${esc(C.name)}" href="${u('/rss.xml')}">
 <script>${THEME_SCRIPT}</script>
 <link rel="stylesheet" href="${S.asset('tokens.css')}">
@@ -336,8 +359,9 @@ ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
 ${ld.length ? `<script type="application/ld+json">${JSON.stringify(ld.length === 1 ? ld[0] : ld).replace(/</g, '\\u003c')}</script>` : ''}
 </head>
 <body class="${o.bodyClass || ''}">
+${S.includeDrafts ? '<p class="previewbar" role="status">Preview build: drafts and scheduled posts are shown, and search engines are told to ignore this site. Do not publish this output.</p>' : ''}
 ${header(o.path)}
-${o.progress ? '<div class="read-progress" id="read-progress" aria-hidden="true"><span></span></div>' : ''}
+${o.progress ? `<div class="read-progress" id="read-progress" aria-hidden="true" data-min="${Number(o.readMin) || 0}"><span></span><b class="read-progress__left" hidden></b></div>` : ''}
 <div class="stage"><div class="wrap">
 ${o.crumbs ? crumbs(o.crumbs) : ''}
 <div class="layout${o.wide ? ' layout--wide' : ''}">

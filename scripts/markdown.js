@@ -15,7 +15,11 @@ export const slugify = (s = '') =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-const unquote = (v) => v.replace(/^(['"])(.*)\1$/, '$2');
+const unquote = (v) => {
+  const m = String(v).match(/^(['"])([\s\S]*)\1$/);
+  if (!m) return v;
+  return m[1] === '"' ? m[2].replace(/\\(["\\/nt])/g, (x, c) => ({ n: '\n', t: '\t' }[c] || c)) : m[2].replace(/''/g, "'");
+};
 
 /**
  * Minimal front matter parser.
@@ -39,7 +43,11 @@ export function parseFrontmatter(src) {
     const key = line.slice(0, at).trim();
     if (!/^[A-Za-z_][\w-]*$/.test(key)) continue;
     let v = line.slice(at + 1).trim();
-    if (v === '') {
+    if (/^[|>][+-]?$/.test(v)) { // YAML block text (what some editors write for long values)
+      const rows = [];
+      while (i + 1 < lines.length && (/^\s+/.test(lines[i + 1]) || !lines[i + 1].trim())) rows.push(lines[++i].replace(/^\s{1,4}/, ''));
+      v = (v[0] === '>' ? rows.join(' ').replace(/\s+/g, ' ') : rows.join('\n')).trim();
+    } else if (v === '') {
       const items = [];
       while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) items.push(unquote(lines[++i].replace(/^\s*-\s+/, '').trim()));
       v = items.length ? items : '';

@@ -11,8 +11,9 @@ const port = Number(process.env.PORT) || 4321;
 const watch = process.argv.includes('--watch');
 const base = (() => { const b = (process.env.BASE_PATH || '').trim(); return b && b !== '/' ? '/' + b.replace(/^\/+|\/+$/g, '') : ''; })();
 
-const build = () => spawnSync(process.execPath, [path.join(ROOT, 'scripts/build.js')], { stdio: 'inherit' });
-if (watch || !fs.existsSync(DIST)) build();
+const drafts = process.argv.includes('--drafts'); // preview drafts and scheduled posts
+const build = () => spawnSync(process.execPath, [path.join(ROOT, 'scripts/build.js'), ...(drafts ? ['--drafts'] : [])], { stdio: 'inherit' });
+if (watch || drafts || !fs.existsSync(DIST)) build();
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

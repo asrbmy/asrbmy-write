@@ -146,6 +146,72 @@ Both are off until you fill in `newsletter` and `analytics` in `site.config.js`.
 - **Newsletter:** a sign-up form under each article (and optionally in the sidebar) that posts to Buttondown, Mailchimp or any service with a form address. No server of your own is needed.
 - **Analytics:** Plausible, GoatCounter or a custom script. The Privacy page updates itself to say which one you use, and the Content-Security-Policy allows only that service.
 
+### Reader tools (the "Aa" button)
+
+Every page has an **Aa** button in the header. Readers can change text size, line width, switch to an easy-read font (Atkinson Hyperlegible) or a dyslexia-friendly font (OpenDyslexic), and turn on a high-contrast mode. Choices are stored in their own browser only. The fonts are part of the site (nothing is loaded from a font service) and are only downloaded when someone picks them. Switch the button off with `reader: { enabled: false }` in `site.config.js`.
+
+On articles, readers also get a **"N min left"** pill while scrolling, an **Up next** card at the end (the next part of a series, or the most related article), and, when they select text, a small bar to **copy a link to that passage** (it opens the page scrolled to and highlighting those words in modern browsers) or **copy the quote**. The Archive is grouped by year and month and has a **random article** button.
+
+### Search
+
+Search tolerates typos ("pythn" finds Python), highlights matches, and can be narrowed by category, tag and year, or sorted by newest. Every filter is saved in the page address, so a filtered search can be bookmarked or shared.
+
+### Offline reading
+
+After a first visit the site opens without a connection. Pages you opened are kept, and anything a reader taps **Save for later** on is stored for offline use (the Reading list page and an "offline" page work without internet). It is a service worker (`sw.js`), generated on every build, which fetches pages network-first so readers always get the newest version. Turn it off with `offline: { enabled: false }`. Browsers only allow it on `https://` (GitHub Pages) and `localhost`.
+
+### Share images
+
+Articles without a cover image get an automatic 1200×630 share card (title, category and site name in your colours), so links look good on social networks and chat apps. An SVG cover is also replaced this way, because social networks cannot show SVG. It needs `sharp` (installed automatically; if it cannot be installed the default image is used). Turn it off with `seo: { autoImages: false }`. Titles in non-Latin scripts (Hindi, Arabic…) use the default image.
+
+### Contact form (optional)
+
+The Contact page can include a message form with a "Suggest a topic" choice. The site is static, so the form posts to a form service: create a free form at [Formspree](https://formspree.io), [Web3Forms](https://web3forms.com) or similar, then set in `site.config.js`:
+
+```js
+contact: { email: 'you@example.com', form: { enabled: true, action: 'https://formspree.io/f/xxxxxxx', next: 'https://you.github.io/thanks/' } }
+```
+
+Messages never pass through this site. The page's Content-Security-Policy is widened for that one address only, and the form has a hidden spam trap field.
+
+### Popular articles and view counts (optional)
+
+Both use [GoatCounter](https://www.goatcounter.com) (free, no cookies). First turn on analytics: `analytics: { provider: 'goatcounter', code: 'your-code' }`.
+
+- **Views on each article:** set `views: { enabled: true }` and, in GoatCounter, *Settings → "Allow adding visitor counts on your website"*. A "1,234 views" label appears once the number is known; if it cannot be read, nothing is shown.
+- **"Popular this month" in the sidebar:** set `popular: { enabled: true }`. The list is fetched while the site builds. Create an API token in GoatCounter (*Settings → API*, with the Statistics permission) and save it in GitHub under *Settings → Secrets and variables → Actions* as `GOATCOUNTER_TOKEN`. Without it the block is simply left out. The site rebuilds daily, so the list stays fresh.
+
+### Bring in old writing (WordPress, Blogger, Markdown)
+
+```bash
+npm run import -- path/to/export.xml                 # WordPress or Blogger export (detected automatically)
+npm run import -- path/to/old-notes-folder           # a folder of .md files (Jekyll, Hugo, Obsidian…)
+npm run import -- export.xml --download-images --pages --dry-run
+```
+
+*WordPress:* Tools → Export → Posts. *Blogger:* Settings → Manage blog → Back up content (or Google Takeout). Posts become Markdown files in `content/articles/`, with title, date, category and tags filled in; unpublished ones get `draft: true`; YouTube embeds become the site's click-to-play video; scripts are dropped. Nothing is overwritten unless you add `--force`. `--download-images` copies pictures (PNG, JPEG, GIF, WebP up to 8 MB) into `public/images/imported/`; `--pages` also imports static pages. Always read the imported files before publishing: old themes' shortcodes are reported but not converted.
+
+### Check outside links
+
+`npm run links` visits every link that points to another website and lists the ones that are really broken (404, 410, domain gone). Sites that block robots are listed as "could not be checked" and never count as broken. The workflow `.github/workflows/links.yml` runs it every Monday and on demand (Actions tab → *Check outside links* → Run workflow); a failed run emails you.
+
+### Preview drafts and scheduled posts
+
+```bash
+npm run dev:drafts      # live preview including drafts and future-dated posts
+npm run build:drafts    # the same, as a one-off build
+```
+
+Drafts and scheduled posts are tagged **Draft** / **Scheduled**, a yellow banner explains it is a preview, and every page is marked `noindex`. Never deploy this output; the normal `npm run build` hides them.
+
+### Write from your phone (optional)
+
+Setting `cms: { enabled: true }` adds **/admin/**, a browser editor ([Sveltia CMS](https://github.com/sveltia/sveltia-cms)) that opens and saves the Markdown files in your repository, with a form for each front-matter field and an image uploader. Sign in with GitHub (a fine-grained personal access token limited to this repository with *Contents: read and write* works without any server). New articles start as **drafts**; untick *Draft* when you are ready to publish. Each save is a commit, so the site rebuilds by itself. The editor script is loaded from unpkg at a fixed version and checked with an integrity hash (see `scripts/cms.js` to update it). The site must be built on GitHub Actions, or have `repo: 'owner/name'` set.
+
+### Email digest of new posts
+
+The easiest way is to let your email service read the RSS feed: Buttondown, Mailchimp and MailerLite can send a message whenever `/rss.xml` gets a new article. Set `feed: { fullText: true }` so the feed carries the whole article, then point the service at `https://your-site/rss.xml`. Combine it with the newsletter form above so people can subscribe.
+
 ### Edit or remove an article
 
 Edit or delete its file in `content/articles/` and commit. Pages, listings, search, feeds and the sitemap all update on the next build.
@@ -210,11 +276,12 @@ content/articles/*.md   your writing
 content/pages/*.md      About, Privacy, Terms
 public/                 logo, favicon, images (copied as-is)
 site.config.js          name, navigation, theme tokens
-src/                    theme.css, site.js, font-tester.js
+src/                    theme.css, site.js, sw.js (offline), font-tester.js …
 fonts.config.js         font presets
 writer/                 the Writer app (runs on your PC, not part of the website)
   writer.config.js      Writer settings
-scripts/                build.js, markdown.js, templates.js, tokens.js, check.js, serve.js
+scripts/                build.js, markdown.js, templates.js, tokens.js, check.js, serve.js,
+                        import.js (WordPress/Blogger/Markdown), linkcheck.js, og.js (share images), cms.js
 dist/                   generated output (not committed)
 ```
 
@@ -225,7 +292,10 @@ dist/                   generated output (not committed)
 - **Diagram pages** are the only pages that allow inline styles (the diagram library needs them); every other page does not. Video, comment, analytics and newsletter services are allowed only on the pages that use them, and only the exact addresses involved.
 - **Writer app** listens on `127.0.0.1` only, needs a random per-run token, rejects foreign Host headers, writes files atomically and checks that uploaded images really are images.
 - **Dev server** (`npm run dev`) is local-only by default and answers malformed URLs safely; set `HOST=0.0.0.0` to share it on your network.
-- `npm audit` reports no known vulnerabilities in the two dependencies.
+- **Offline support** (`sw.js`) only handles requests to this site, never other websites, and only keeps pages and files the reader already opened or saved. Switch it off with `offline: { enabled: false }`; readers can clear it from their browser's site settings.
+- **Contact form, newsletter, comments, analytics and the optional editor** each talk to one fixed outside service and are off until you configure them. The reader-settings choices, reading list and offline copies never leave the reader's browser.
+- **The importer** drops scripts and only downloads pictures of an allowed type and size.
+- `npm audit` reports no known vulnerabilities in the dependencies.
 
 ## Notes
 

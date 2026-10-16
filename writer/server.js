@@ -85,7 +85,7 @@ function serveStatic(res, file, transform) {
 }
 
 // ── Front matter ─────────────────────────────────────────────────────────────
-const ORDER = ['title', 'slug', 'date', 'updated', 'category', 'tags', 'excerpt', 'subtitle', 'author', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'readingTime'];
+const ORDER = ['title', 'slug', 'date', 'updated', 'category', 'tags', 'excerpt', 'subtitle', 'author', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf', 'readingTime'];
 function fmValue(v) {
   if (Array.isArray(v)) return `[${v.map((x) => String(x).replace(/[,\[\]]/g, '').trim()).filter(Boolean).join(', ')}]`;
   if (typeof v === 'boolean') return String(v);
@@ -124,6 +124,7 @@ function validate(front, body, currentFile) {
   if (!front.slug) throw new HttpError(400, 'The slug is empty — use letters or numbers in the title.');
   if (front.seriesOrder !== undefined && front.seriesOrder !== '' && !(Number.isFinite(Number(front.seriesOrder)) && Number(front.seriesOrder) > 0)) throw new HttpError(400, 'Part number must be a positive number.');
   if (front.cover && !/^(https:\/\/|\/?images\/|\/?public\/images\/)/i.test(String(front.cover).trim())) throw new HttpError(400, 'Cover image must be a file in images (like /images/cover.jpg) or an https:// address.');
+  if (front.lang && !/^[a-z]{2,3}(-[A-Za-z0-9]+)*$/.test(String(front.lang))) throw new HttpError(400, 'The language must be a code such as en, hi or pt-BR.');
   front.category = String(front.category || W.defaultCategory || 'Notes').trim();
   front.tags = Array.isArray(front.tags) ? front.tags : String(front.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const clash = listFiles().find((a) => a.file !== currentFile && a.slug === front.slug);
@@ -143,7 +144,7 @@ async function api(req, res, p, url) {
     const tags = [...new Set(arts.flatMap((a) => a.tags))].sort();
     const series = [...new Set(arts.map((a) => a.series).filter(Boolean))].sort();
     return json(res, 200, { siteName: SITE.name, author: DEFAULT_AUTHOR, defaultCategory: W.defaultCategory || 'Notes', categories: cats, tags, series, autosaveSeconds: Number(W.autosaveSeconds) || 0, articlesDir: ARTICLES, imagesDir: IMAGES, filenameDate: W.filenameDate !== false,
-      wordGoal: Number(W.wordGoal) || 0, publishEnabled: W.publish?.enabled !== false,
+      languages: (Array.isArray(SITE.languages) ? SITE.languages : []).filter((l) => l && l.code).map((l) => ({ code: String(l.code), label: String(l.label || l.code) })), wordGoal: Number(W.wordGoal) || 0, publishEnabled: W.publish?.enabled !== false,
       templates: (W.templates || []).filter((t) => t && t.id && t.label).map((t) => ({ id: String(t.id), label: String(t.label), category: t.category || '', tags: Array.isArray(t.tags) ? t.tags : [], body: String(t.body || '') })) });
   }
   if (method === 'GET' && p === '/api/articles') return json(res, 200, listFiles());

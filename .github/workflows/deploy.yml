@@ -34,6 +34,9 @@ jobs:
       #     BASE_PATH: ""
       #     SITE_URL: https://example.com
       - run: npm run build
+        env:
+          # Optional: lets the build fetch "Popular this month" from GoatCounter (see the README)
+          GOATCOUNTER_TOKEN: ${{ secrets.GOATCOUNTER_TOKEN }}
       - run: npm run check
       - uses: actions/upload-pages-artifact@v3
         with:

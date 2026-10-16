@@ -7,6 +7,7 @@
     status: $('status'), siteName: $('site-name'), list: $('file-list'), foot: $('files-foot'), filter: $('file-search'),
     title: $('f-title'), slug: $('f-slug'), date: $('f-date'), cat: $('f-cat'), tags: $('f-tags'), excerpt: $('f-excerpt'),
     series: $('f-series'), part: $('f-part'), cover: $('f-cover'), coverAlt: $('f-coveralt'), comments: $('f-comments'),
+    lang: $('f-lang'), trans: $('f-trans'), best: $('f-best'),
     featured: $('f-featured'), draft: $('f-draft'), body: $('f-body'), preview: $('preview'), info: $('info'),
     cTitle: $('c-title'), cExcerpt: $('c-excerpt'), split: $('split'), files: $('files'),
     save: $('btn-save'), del: $('btn-delete'), download: $('btn-download'),
@@ -28,7 +29,7 @@
   const send = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
   // ── Form <-> article ───────────────────────────────────────────────────────
-  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments'];
+  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf'];
   function collect() {
     const title = el.title.value.trim();
     return {
@@ -36,7 +37,8 @@
       tags: el.tags.value.split(',').map((t) => t.trim()).filter(Boolean), excerpt: el.excerpt.value.trim(),
       featured: el.featured.checked, draft: el.draft.checked,
       series: el.series.value.trim(), seriesOrder: el.part.value ? Number(el.part.value) : '', cover: el.cover.value.trim(), coverAlt: el.coverAlt.value.trim(),
-      comments: el.comments.checked,
+      comments: el.comments.checked, best: el.best.checked,
+      lang: el.lang.value && el.lang.value !== (state.languages?.[0]?.code || '') ? el.lang.value : '', translationOf: el.trans.value.trim(),
     };
   }
   function fill(file, front, body) {
@@ -45,10 +47,11 @@
     el.cat.value = front.category || state.defaultCategory; el.tags.value = (front.tags || []).join(', ');
     el.excerpt.value = front.excerpt || ''; el.featured.checked = front.featured === true; el.draft.checked = front.draft === true;
     el.series.value = front.series || ''; el.part.value = front.seriesOrder || ''; el.cover.value = front.cover || ''; el.coverAlt.value = front.coverAlt || '';
-    el.comments.checked = front.comments !== false;
+    el.comments.checked = front.comments !== false; el.best.checked = front.best === true;
+    el.lang.value = front.lang || (state.languages?.[0]?.code || ''); el.trans.value = front.translationOf || ''; spellLang();
     el.body.value = body || '';
     slugTouched = !!file;
-    dirty = false; counters(); renderPreview(); buttons(); highlight(); updateGoal();
+    dirty = false; counters(); renderPreview(); buttons(); highlight(); updateGoal(); updateReadability();
   }
   function buttons() { el.del.disabled = el.download.disabled = !cur.file; }
 
@@ -186,7 +189,7 @@
   el.title.addEventListener('input', () => { if (!slugTouched) el.slug.value = slugify(el.title.value); changed(); });
   el.slug.addEventListener('input', () => { slugTouched = el.slug.value.trim() !== ''; changed(); });
   $('meta').addEventListener('submit', (e) => e.preventDefault());
-  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body', 'series', 'part', 'cover', 'coverAlt', 'comments']) el[k].addEventListener('input', changed);
+  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body', 'series', 'part', 'cover', 'coverAlt', 'comments', 'best', 'trans']) el[k].addEventListener('input', changed);
   el.filter.addEventListener('input', drawList);
   el.save.addEventListener('click', () => save(true));
   $('btn-new').addEventListener('click', newArticle);
@@ -236,6 +239,53 @@
     $('goal-text').textContent = n >= goal ? `${n} words — goal reached` : `${n} / ${goal} words`;
   }
   el.body.addEventListener('input', updateGoal);
+
+  // ── Spell-check language: the browser checks spelling in the language set on the editor ──
+  function spellLang() { el.body.lang = el.lang.value || 'en'; el.body.spellcheck = true; }
+  el.lang.addEventListener('change', () => { spellLang(); changed(); });
+
+  // ── Readability: reading level and long sentences (English-style estimate; sentence length works for any Latin text) ──
+  const plain = (md) => md.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*(?:#{1,6}|>|[-*+]|\d+\.)\s+/gm, '').replace(/^\s*\|.*\|\s*$/gm, ' ').replace(/<[^>]+>/g, ' ').replace(/[*_~]+/g, '').replace(/\$\$[\s\S]*?\$\$/g, ' ');
+  const syllables = (w) => { w = w.toLowerCase().replace(/[^a-z]/g, ''); if (!w) return 0; if (w.length <= 3) return 1; w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '').replace(/^y/, ''); return Math.max(1, (w.match(/[aeiouy]{1,2}/g) || []).length); };
+  function analyse(md) {
+    const text = plain(md);
+    const sentences = text.split(/(?<=[.!?…])\s+|\n{2,}/).map((x) => x.trim()).filter((x) => /[\p{L}\p{N}]/u.test(x));
+    const wordsOf = (x) => x.match(/[\p{L}\p{N}'’-]+/gu) || [];
+    const all = sentences.map(wordsOf);
+    const n = all.reduce((a, w) => a + w.length, 0);
+    if (n < 40) return null;
+    const syl = all.flat().reduce((a, w) => a + syllables(w), 0);
+    const per = n / Math.max(1, sentences.length), spw = syl / n;
+    const ease = Math.round(206.835 - 1.015 * per - 84.6 * spw);
+    const grade = Math.max(1, Math.round(0.39 * per + 11.8 * spw - 15.59));
+    const long = sentences.map((s, i) => ({ s, n: all[i].length })).filter((x) => x.n > 28).sort((a, b) => b.n - a.n);
+    return { n, per: Math.round(per), ease, grade, long, latin: /^[\p{Script=Latin}\p{N}\p{P}\p{S}\p{Z}]*$/u.test(text) };
+  }
+  let lastRd = null;
+  function updateReadability() {
+    const b = $('readability');
+    lastRd = analyse(el.body.value);
+    if (!lastRd) { b.hidden = true; return; }
+    b.hidden = false;
+    const r = lastRd;
+    b.textContent = (r.latin && /^en/.test(el.lang.value || 'en') ? `Grade ${r.grade} · ` : '') + `${r.per} words/sentence` + (r.long.length ? ` · ${r.long.length} long` : '');
+    b.classList.toggle('is-warn', r.long.length > 0 || r.per > 24);
+  }
+  let rdTimer;
+  el.body.addEventListener('input', () => { clearTimeout(rdTimer); rdTimer = setTimeout(updateReadability, 400); });
+  $('readability').addEventListener('click', () => {
+    const r = lastRd; if (!r) return;
+    const dlg = $('dlg');
+    $('dlg-title').textContent = 'Readability';
+    const t = $('dlg-text'); t.textContent = '';
+    const lines = [`${r.n} words, about ${r.per} words per sentence.`];
+    if (r.latin && /^en/.test(el.lang.value || 'en')) lines.push(`Reading ease ${r.ease} (60–70 is plain English). School grade ${r.grade}. Aim for grade 7–9 for a general audience.`);
+    lines.push(r.long.length ? `${r.long.length} sentence${r.long.length === 1 ? ' is' : 's are'} over 28 words. Consider splitting the longest:` : 'No very long sentences. Nice.');
+    for (const x of r.long.slice(0, 6)) lines.push(`• (${x.n} words) ${x.s.length > 160 ? x.s.slice(0, 157) + '…' : x.s}`);
+    t.textContent = lines.join('\n');
+    dlg.showModal();
+  });
 
   // ── Templates ──────────────────────────────────────────────────────────────
   $('tpl').addEventListener('change', async (e) => {
@@ -292,6 +342,7 @@
       for (const t of state.templates || []) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; $('tpl').append(o); }
       $('btn-publish').hidden = !state.publishEnabled;
       await refresh();
+      if ((state.languages || []).length > 1) { el.lang.innerHTML = state.languages.map((l) => `<option value="${esc(l.code)}">${esc(l.label)}</option>`).join(''); $('lang-box').hidden = false; $('trans-box').hidden = false; }
       fill(null, { date: today(), category: state.defaultCategory }, '');
       say(`Ready. ${list.length} article${list.length === 1 ? '' : 's'} in your folder.`);
     } catch (e) { say(e.message, 'err'); }

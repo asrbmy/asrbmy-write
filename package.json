@@ -1,7 +1,7 @@
 {
   "name": "asrbmy-write",
   "version": "1.0.0",
-  "description": "ASRBMY Write — a static writing and publishing site for GitHub Pages.",
+  "description": "ASRBMY Write \u2014 a static writing and publishing site for GitHub Pages.",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,15 +14,23 @@
     "preview": "node scripts/serve.js",
     "test": "npm run test:unit && npm run build && npm run check",
     "write": "node writer/server.js",
-    "test:unit": "node tests/regression.mjs"
+    "test:unit": "node tests/regression.mjs",
+    "links": "node scripts/linkcheck.js",
+    "import": "node scripts/import.js",
+    "build:drafts": "node scripts/build.js --drafts",
+    "dev:drafts": "node scripts/serve.js --watch --drafts"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/opendyslexic": "^5.3.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.19.0",
     "marked": "^14.1.2",
     "mermaid": "^12.2.0"
   },
   "optionalDependencies": {
-    "sharp": "^0.35.5"
+    "fast-xml-parser": "^5.11.2",
+    "sharp": "^0.35.5",
+    "turndown": "^7.2.4"
   }
 }

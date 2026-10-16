@@ -7,7 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFrontmatter, renderMarkdown, htmlToText, esc, slugify, cleanUrl } from './markdown.js';
 import { createTemplates, icon } from './templates.js';
 import { optimiseImages } from './images.js';
-import { analyticsInfo } from './features.js';
+import { analyticsInfo, contactInfo, viewsInfo, fetchPopular } from './features.js';
+import { makeCards } from './og.js';
+import { cmsInfo, adminHtml, adminConfig } from './cms.js';
 import { tokensCss, resolveTypography } from './tokens.js';
 import { fontPresets, fontFamilies } from '../fonts.config.js';
 
@@ -37,7 +39,7 @@ const fmtDate = (d) =>
 
 // ── Load articles ────────────────────────────────────────────────────────────
 const defaults = { author: C.author?.name, category: 'Notes', featured: false, ...(C.defaults || {}) };
-const includeDrafts = !!process.env.INCLUDE_DRAFTS;
+const includeDrafts = !!process.env.INCLUDE_DRAFTS || process.argv.includes('--drafts');
 const fail = (msg) => { console.error(`\n✖ ${msg}\n`); process.exit(1); };
 
 const validDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
@@ -141,6 +143,7 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') &&
   if (!validDate(String(fm.date || ''))) fail(`${where}: "date" must be a real date written like 2026-04-26 (got "${fm.date ?? ''}")`);
   if (fm.updated && !validDate(String(fm.updated))) fail(`${where}: "updated" must be a real date written like 2026-04-26`);
   if (String(fm.date) > today && !includeDrafts) { scheduled.push(`${fm.date}  ${fm.title}`); continue; } // scheduled: goes live on its date
+  const status = fm.draft === true ? 'draft' : String(fm.date) > today ? 'scheduled' : '';
   const slug = slugify(fm.slug || file.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, ''));
   if (!slug) fail(`${where}: could not make a URL slug — add a "slug:" using letters or numbers`);
   const category = String(fm.category || defaults.category).trim();
@@ -155,7 +158,7 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') &&
   const firstPara = htmlToText((html.match(/<p>([\s\S]*?)<\/p>/) || [, ''])[1]);
   const excerpt = String(fm.excerpt || (firstPara.length > 180 ? firstPara.slice(0, 177).trimEnd() + '…' : firstPara));
   allArticles.push({
-    file, slug, lang, translationOf: fm.translationOf ? slugify(String(fm.translationOf)) : '', features, best: fm.best === true,
+    file, slug, status, lang, translationOf: fm.translationOf ? slugify(String(fm.translationOf)) : '', features, best: fm.best === true,
     url: lang === defaultLang ? `/articles/${slug}/` : `/${lang}/articles/${slug}/`, title: String(fm.title), subtitle: fm.subtitle ? String(fm.subtitle) : '',
     date: String(fm.date), updated: fm.updated ? String(fm.updated) : '',
     author: String(fm.author || defaults.author), category, tags, featured: fm.featured === true,
@@ -279,7 +282,7 @@ const hasRoute = (href) => {
 const sha = (x) => crypto.createHash('sha1').update(x).digest('hex').slice(0, 8);
 const assetVer = {
   'tokens.css': sha(tokensCss(C)),
-  ...Object.fromEntries(['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js'].map((f) => [f, sha(fs.readFileSync(path.join(ROOT, 'src', f)))])),
+  ...Object.fromEntries(['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js', 'random.js'].map((f) => [f, sha(fs.readFileSync(path.join(ROOT, 'src', f)))])),
 };
 const asset = (name) => `${u(`/assets/${name}`)}?v=${assetVer[name]}`;
 const searchIndexJson = JSON.stringify(articles.map((a) => ({ t: a.title, u: u(a.url), c: a.category, g: a.tags, e: a.excerpt, d: a.date, r: a.readingTime, x: a.text })));
@@ -296,7 +299,29 @@ const socialForTemplate = (C.social || [])
   .filter((s) => s.href);
 
 const imgSrc = (c) => (/^https:/i.test(c) ? c : u(c));
-const S = { allArticles, translations, languages, defaultLang, langOf, authorList, bestList, glossary, projects, imgSrc, seriesList, config: C, base, siteUrl, u, abs, asset, fmtDate, articles, categories, tags, catSlug, tagSlug, hasRoute, social: socialForTemplate };
+const guard = (fn) => { try { return fn(); } catch (e) { return fail(e.message); } };
+const vInfo = guard(() => viewsInfo(C));
+const offlineOn = C.offline?.enabled !== false;
+// "Popular this month" comes from GoatCounter while building (needs the GOATCOUNTER_TOKEN secret)
+let popular = null;
+if (vInfo?.popular) {
+  const hits = await fetchPopular(vInfo, process.env.GOATCOUNTER_TOKEN);
+  const byPath = new Map(articles.map((a) => [u(a.url), a]));
+  const list = [];
+  for (const h of hits) { const a = byPath.get(h.path) || byPath.get(h.path.replace(/\/?$/, '/')); if (a && !list.includes(a)) list.push(a); }
+  if (list.length) popular = { title: vInfo.title, list: list.slice(0, vInfo.count) };
+  else if (!process.env.GOATCOUNTER_TOKEN && !process.env.QUIET) console.log('ℹ popular: set the GOATCOUNTER_TOKEN secret to show "Popular this month" (see the README).');
+}
+// Social networks cannot show SVG pictures, so a cover must be png/jpg/webp/gif to be used for sharing
+const shareable = (c) => !!c && !/\.svg(?:[?#]|$)/i.test(c);
+// Share cards for articles without a (shareable) cover (written to .cache, copied into dist at the end)
+const ogOut = path.join(ROOT, '.cache/og-out');
+fs.rmSync(ogOut, { recursive: true, force: true });
+const cards = C.seo?.autoImages === false ? new Map() : await makeCards(
+  allArticles.filter((a) => !shareable(a.cover)).map((a) => ({ id: `${a.lang}-${a.slug}`, title: a.title, category: a.category })),
+  { outDir: ogOut, cacheDir: path.join(ROOT, '.cache/og'), site: C.name, tagline: C.tagline, theme: C.theme });
+for (const a of allArticles) { const f = cards.get(`${a.lang}-${a.slug}`); a.autoOg = f ? `/images/_og/${f}` : ''; }
+const S = { popular, views: vInfo, offline: offlineOn, includeDrafts, allArticles, translations, languages, defaultLang, langOf, authorList, bestList, glossary, projects, imgSrc, seriesList, config: C, base, siteUrl, u, abs, asset, fmtDate, articles, categories, tags, catSlug, tagSlug, hasRoute, social: socialForTemplate };
 let T;
 try { T = createTemplates(S); } catch (e) { fail(e.message); }
 
@@ -397,19 +422,26 @@ ${panelHead({ kicker: 'Tag', title: `#${t.name}`, lede: `${t.count} article${t.c
   }
 }
 
-// ── Archive ──────────────────────────────────────────────────────────────────
+// ── Archive (by year, then month) ────────────────────────────────────────────
 {
+  const monthName = (d) => new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
   const byYear = new Map();
   for (const a of articles) {
     const y = a.date.slice(0, 4);
-    if (!byYear.has(y)) byYear.set(y, []);
-    byYear.get(y).push(a);
+    if (!byYear.has(y)) byYear.set(y, new Map());
+    const months = byYear.get(y);
+    const m = a.date.slice(0, 7);
+    if (!months.has(m)) months.set(m, []);
+    months.get(m).push(a);
   }
+  const yearsNav = byYear.size > 1 ? `<nav class="az" aria-label="Jump to year">${[...byYear.keys()].map((y) => `<a href="#y-${y}">${y}</a>`).join('')}</nav>` : '';
   const body = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Everything, by date', title: 'Archive', lede: `${articles.length} article${articles.length === 1 ? '' : 's'} since ${articles.length ? fmtDate(articles[articles.length - 1].date).slice(-4) : '—'}.` })}
-${[...byYear.entries()].map(([y, list]) => `<section class="archive__year" aria-labelledby="y-${y}"><h2 id="y-${y}">${y}</h2><ul class="archive__list">${list.map((a) => `<li><time datetime="${a.date}">${fmtDate(a.date).replace(/, \d{4}$/, '')}</time><a href="${u(a.url)}">${esc(a.title)}</a><span class="archive__cat">${esc(a.category)}</span></li>`).join('')}</ul></section>`).join('')}
+${articles.length > 1 ? `<p class="archive__tools"><a class="btn btn--ghost" href="${u('/writing/')}" data-random data-index="${esc(searchUrl)}">${icon('dice', 15)} Read a random article</a></p>` : ''}
+${yearsNav}
+${[...byYear.entries()].map(([y, months]) => `<section class="archive__year" aria-labelledby="y-${y}"><h2 id="y-${y}">${y}</h2>${[...months.entries()].map(([m, list]) => `<h3 class="archive__month" id="m-${m}">${monthName(list[0].date)} <span>${list.length}</span></h3><ul class="archive__list">${list.map((a) => `<li><time datetime="${a.date}">${fmtDate(a.date).replace(/, \d{4}$/, '')}</time><a href="${u(a.url)}">${esc(a.title)}</a><span class="archive__cat">${esc(a.category)}</span></li>`).join('')}</ul>`).join('')}</section>`).join('')}
 </section>`;
-  emit('/archive/', T.page({ title: 'Archive', path: u('/archive/'), body, crumbs: [homeCrumb, { label: 'Archive' }], description: `Every article on ${C.name}, by date.` }));
+  emit('/archive/', T.page({ title: 'Archive', path: u('/archive/'), body, crumbs: [homeCrumb, { label: 'Archive' }], description: `Every article on ${C.name}, by date.`, scripts: ['random.js'] }));
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────
@@ -422,6 +454,7 @@ ${panelHead({ kicker: 'Find an article', title: 'Search', lede: 'Searches titles
     <input id="q" name="q" type="search" placeholder="Search articles…" autocomplete="off" autofocus>
     <button type="submit" class="btn-solid">Search</button>
   </form>
+  <div class="search-filters" id="search-filters" hidden></div>
   <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
   <ol id="search-results" class="results"></ol>
   <noscript><p>Search needs JavaScript. You can browse <a href="${u('/writing/')}">all articles</a> instead.</p></noscript>
@@ -448,17 +481,30 @@ ${panelHead({ kicker: fm.kicker ? esc(sub(fm.kicker)) : '', title: sub(fm.title 
 }
 
 // ── Contact (generated from config) ──────────────────────────────────────────
+const contactForm = guard(() => contactInfo(C));
 {
   const rows = [];
   if (C.contact?.email) rows.push(`<li><span class="contact__k">Email</span><a href="mailto:${esc(C.contact.email)}">${esc(C.contact.email)}</a></li>`);
   for (const s of social) if (s.icon !== 'rss') rows.push(`<li><span class="contact__k">${esc(s.label)}</span><a href="${esc(s.href)}" rel="noopener noreferrer" target="_blank">${esc(s.href.replace(/^https?:\/\//, ''))}</a></li>`);
+  const form = contactForm ? `<form class="contactform" method="post" action="${esc(contactForm.action)}" aria-labelledby="cf-t">
+  <h2 id="cf-t">Send a message</h2>
+  ${contactForm.next ? `<input type="hidden" name="_next" value="${esc(contactForm.next)}"><input type="hidden" name="_redirect" value="${esc(contactForm.next)}">` : ''}
+  <div class="field"><label for="cf-name">Your name <small>(optional)</small></label><input id="cf-name" name="name" autocomplete="name" maxlength="120"></div>
+  <div class="field"><label for="cf-email">Your email</label><input id="cf-email" type="email" name="email" autocomplete="email" required maxlength="200"></div>
+  <div class="field"><label for="cf-topic">What is it about?</label><select id="cf-topic" name="topic">${contactForm.topics.map((t) => `<option>${esc(t)}</option>`).join('')}</select></div>
+  <div class="field"><label for="cf-msg">Message</label><textarea id="cf-msg" name="message" rows="7" required maxlength="4000"></textarea></div>
+  <p class="cf-trap" aria-hidden="true"><label>Leave this empty <input type="text" name="_gotcha" tabindex="-1" autocomplete="off"></label></p>
+  <p><button type="submit" class="btn">Send message</button></p>
+  <p class="newsletter__note">${esc(contactForm.note)}</p>
+</form>` : '';
   const body = `<article class="panel panel--top">
 ${panelHead({ kicker: 'Get in touch', title: 'Contact', lede: `The best way to reach ${esc(C.author?.name || C.name)}.` })}
 <div class="prose">
-${rows.length ? `<ul class="contact">${rows.join('')}</ul>` : `<p>No contact details have been added yet. Set <code>contact.email</code> and the <code>social</code> links in <code>site.config.js</code> and they will appear here.</p>`}
-<p>This site is static, so there is no contact form — it never collects your details.</p>
+${rows.length ? `<ul class="contact">${rows.join('')}</ul>` : contactForm ? '' : `<p>No contact details have been added yet. Set <code>contact.email</code> and the <code>social</code> links in <code>site.config.js</code> and they will appear here.</p>`}
+${form}
+${contactForm ? '' : '<p>This site is static, so there is no contact form: it never collects your details.</p>'}
 </div></article>`;
-  emit('/contact/', T.page({ title: 'Contact', path: u('/contact/'), body, crumbs: [homeCrumb, { label: 'Contact' }], description: `Contact ${C.author?.name || C.name}.` }));
+  emit('/contact/', T.page({ title: 'Contact', path: u('/contact/'), body, crumbs: [homeCrumb, { label: 'Contact' }], description: `Contact ${C.author?.name || C.name}.`, formOrigins: contactForm ? [contactForm.origin] : [] }));
 }
 
 // ── Font Tester ──────────────────────────────────────────────────────────────
@@ -497,6 +543,27 @@ ${panelHead({ kicker: 'Typography', title: 'Font Tester', lede: 'Try heading and
 }
 
 // ── Articles ─────────────────────────────────────────────────────────────────
+/** If an article has a "FAQ" section (an h2 named FAQ, with a question per h3), describe it for search engines. */
+function faqEntities(html) {
+  const heads = [...html.matchAll(/<(h[23])\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => ({ tag: m[1], text: htmlToText(m[2].replace(/<a class="anchor"[\s\S]*?<\/a>/g, '')), start: m.index, end: m.index + m[0].length }));
+  const at = heads.findIndex((h) => h.tag === 'h2' && /^(faq|faqs|frequently asked questions)$/i.test(h.text));
+  if (at < 0) return [];
+  const out = [];
+  // Questions written as expandable <details><summary>Question</summary>Answer</details> blocks (the Writer's FAQ button)
+  const next2 = heads.slice(at + 1).find((h) => h.tag === 'h2');
+  const section = html.slice(heads[at].end, next2 ? next2.start : html.length);
+  for (const m of section.matchAll(/<details\b[^>]*>\s*<summary\b[^>]*>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g)) {
+    const name = htmlToText(m[1]), answer = htmlToText(m[2]);
+    if (name && answer) out.push({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text: answer.slice(0, 1500) } });
+  }
+  if (out.length) return out;
+  for (let i = at + 1; i < heads.length && heads[i].tag === 'h3'; i++) {
+    const stop = heads[i + 1] ? heads[i + 1].start : html.length;
+    const answer = htmlToText(html.slice(heads[i].end, stop));
+    if (heads[i].text && answer) out.push({ '@type': 'Question', name: heads[i].text, acceptedAnswer: { '@type': 'Answer', text: answer.slice(0, 1500) } });
+  }
+  return out;
+}
 function related(a) {
   return allArticles
     .filter((b) => b !== a && b.lang === a.lang)
@@ -513,6 +580,8 @@ allArticles.forEach((a) => {
   const authorPage = a.authorProfile && authorList.some((x) => x.slug === a.authorProfile.slug) ? `/authors/${a.authorProfile.slug}/` : '';
   const langLinks = a.alternates.length ? `<p class="langs"><span>${a.lang === defaultLang ? 'Also available in' : 'Other languages'}:</span> ${a.alternates.map((x) => `<a href="${u(x.url)}" hreflang="${esc(x.lang)}" lang="${esc(x.lang)}">${esc(langOf.get(x.lang)?.label || x.lang)}</a>`).join(' · ')}</p>` : '';
   const rel = related(a);
+  const upNext = (a.seriesInfo && a.seriesInfo.parts[a.seriesInfo.index + 1]) || rel[0] || newer || older || null;
+  const upNextKind = a.seriesInfo && a.seriesInfo.parts[a.seriesInfo.index + 1] ? `Next in the series · ${esc(a.seriesInfo.name)}` : 'Up next';
   const si = a.seriesInfo;
   const series = si ? `<details class="series" id="series-box" open>
     <summary><span class="series__label">Series · Part ${si.index + 1} of ${si.parts.length}</span><a class="series__name" href="${u(`/series/${si.slug}/`)}">${esc(si.name)}</a></summary>
@@ -541,6 +610,8 @@ allArticles.forEach((a) => {
       <span class="byline__item">${authorPage ? `<a href="${u(authorPage)}" rel="author">${esc(a.author)}</a>` : esc(a.author)}</span>
       <span class="byline__item"><time datetime="${a.date}">${fmtDate(a.date)}</time></span>
       <span class="byline__item">${a.readingTime} min read</span>
+      ${vInfo?.views ? `<span class="byline__item" data-views="${esc(`${vInfo.origin}/counter/${encodeURIComponent(u(a.url))}.json`)}" hidden></span>` : ''}
+      ${a.status ? `<span class="byline__item"><span class="chip chip--warn">${a.status === 'draft' ? 'Draft' : 'Scheduled'}</span></span>` : ''}
       ${a.updated ? `<span class="byline__item">Updated <time datetime="${a.updated}">${fmtDate(a.updated)}</time></span>` : ''}
       ${T.tagChips(a.tags)}
     </div>
@@ -551,6 +622,7 @@ allArticles.forEach((a) => {
   <div class="prose">${a.html}</div>
   ${T.shareBar(a)}
   ${T.hasNewsletter ? T.newsletterForm('article') : ''}
+  ${upNext ? `<aside class="upnext" aria-labelledby="h-upnext"><h2 class="upnext__k" id="h-upnext">${upNextKind}</h2><a class="upnext__card" href="${u(upNext.url)}"><span class="upnext__title">${esc(upNext.title)}</span><span class="upnext__ex">${esc(upNext.excerpt)}</span><span class="upnext__meta">${esc(upNext.category)} · ${upNext.readingTime} min read ${icon('arrow', 14)}</span></a></aside>` : ''}
   ${comments}
   ${rel.length ? `<aside class="related" aria-labelledby="h-related"><h2 id="h-related">Related Articles</h2><ul>${rel.map((r) => `<li><a href="${u(r.url)}">${esc(r.title)}</a><span>${esc(r.category)} · ${r.readingTime} min read</span></li>`).join('')}</ul></aside>` : ''}
   <nav class="prevnext" aria-label="More articles">
@@ -560,18 +632,18 @@ allArticles.forEach((a) => {
 </article>`;
   emit(a.url, T.page({
     title: a.title, path: u(a.url), body, description: a.excerpt, bodyClass: `is-article${sideToc ? ' has-side-toc' : ''}`,
-    progress: true, sideExtra: sideToc, ogImage: a.cover || undefined, lang: a.lang, features: a.features,
+    progress: true, readMin: a.readingTime, sideExtra: sideToc, ogImage: (shareable(a.cover) ? a.cover : a.autoOg) || undefined, lang: a.lang, features: a.features,
     alternates: [a, ...a.alternates], scripts: [...(commentsOn ? ['comments.js'] : []), ...(a.features.mermaid ? ['diagrams.js'] : [])],
     article: { published: a.date, modified: a.updated || a.date, section: a.category, tags: a.tags },
     crumbs: [homeCrumb, { label: 'Writing', href: '/writing/' }, { label: a.title }],
-    jsonld: {
+    jsonld: [{
       '@context': 'https://schema.org', '@type': 'BlogPosting', headline: a.title, description: a.excerpt,
       datePublished: a.date, dateModified: a.updated || a.date, author: { '@type': 'Person', name: a.author, ...(authorPage ? { url: abs(u(authorPage)) } : {}) }, inLanguage: a.lang,
       mainEntityOfPage: { '@type': 'WebPage', '@id': abs(u(a.url)) }, keywords: a.tags.join(', '), articleSection: a.category,
-      wordCount: a.text.split(/\s+/).length, image: a.cover ? abs(S.imgSrc(a.cover)) : abs(u(C.seo?.ogImage || '/og-default.png')),
+      wordCount: a.text.split(/\s+/).length, image: shareable(a.cover) ? abs(S.imgSrc(a.cover)) : a.autoOg ? abs(u(a.autoOg)) : abs(u(C.seo?.ogImage || '/og-default.png')),
       ...(si ? { isPartOf: { '@type': 'CreativeWorkSeries', name: si.name, url: abs(u(`/series/${si.slug}/`)) }, position: si.index + 1 } : {}),
       publisher: { '@type': 'Organization', name: C.name, logo: { '@type': 'ImageObject', url: abs(u('/icon-512.png')) } },
-    },
+    }, ...(faqEntities(a.html).length ? [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqEntities(a.html) }] : [])],
   }));
 });
 
@@ -686,30 +758,44 @@ ${panelHead({ kicker: 'Series', title: sr.name, lede: `${sr.parts.length} part${
   }
 }
 
+// ── Offline page (shown by the service worker when a page is not available offline) ──
+if (offlineOn) {
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'No connection', title: 'You are offline', lede: 'This page has not been saved on this device yet.' })}
+<div class="prose"><p>Pages you have already opened still work offline. Articles you pressed <strong>Save for later</strong> on are kept for offline reading:</p></div>
+<div id="bookmarks" data-home="${esc(u('/writing/'))}" aria-live="polite"><p>Loading…</p></div>
+<p><a class="btn" href="${u('/')}">Try the home page</a></p>
+</section>`;
+  emit('/offline/', T.page({ title: 'Offline', path: u('/offline/'), body, wide: true, noindex: true, description: 'You are offline.', scripts: ['bookmarks.js'] }), { sitemap: false });
+}
+
 // ── 404 ──────────────────────────────────────────────────────────────────────
 emit('/404.html', T.page({
   title: 'Page not found', path: u('/404.html'), noindex: true,
   body: `<section class="panel panel--top">
 ${panelHead({ kicker: 'Error 404', title: 'Page not found', lede: 'That page does not exist, or it has moved.' })}
 <div class="prose"><p>Try searching, or head back to one of these:</p>
-<ul><li><a href="${u('/')}">Home</a></li><li><a href="${u('/writing/')}">All writing</a></li><li><a href="${u('/categories/')}">Categories</a></li><li><a href="${u('/search/')}">Search</a></li></ul></div>
+<ul><li><a href="${u('/')}">Home</a></li><li><a href="${u('/writing/')}">All writing</a></li><li><a href="${u('/categories/')}">Categories</a></li><li><a href="${u('/search/')}">Search</a></li>${articles.length > 1 ? `<li><a href="${u('/writing/')}" data-random data-index="${esc(searchUrl)}">A random article</a></li>` : ''}</ul></div>
 </section>`,
+  scripts: ['random.js'],
 }), { sitemap: false });
 
 // ── Feeds ────────────────────────────────────────────────────────────────────
 {
   const rfc = (d) => new Date(`${d}T00:00:00Z`).toUTCString();
   const xml = (v) => esc(String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ''));
+  // Links inside article text are written as /path; a feed reader needs the full address
+  const absolutise = (h) => h.replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${siteUrl}/`).replace(/(\ssrcset=")([^"]+)"/g, (m, a, v) => a + v.replace(/(^|,\s*)\//g, `$1${siteUrl}/`) + '"');
   const items = articles.slice(0, 30).map((a) => `    <item>
       <title>${xml(a.title)}</title>
       <link>${xml(abs(u(a.url)))}</link>
       <guid isPermaLink="true">${xml(abs(u(a.url)))}</guid>
       <pubDate>${rfc(a.date)}</pubDate>
       <category>${xml(a.category)}</category>
-      <description>${xml(a.excerpt)}</description>
+      <description>${xml(a.excerpt)}</description>${C.feed?.fullText ? `\n      <content:encoded><![CDATA[${absolutise(a.html).replace(/]]>/g, ']]]]><![CDATA[>')}]]></content:encoded>` : ''}
     </item>`).join('\n');
   fs.writeFileSync(path.join(DIST, 'rss.xml'), `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>${xml(C.name)}</title>
     <link>${xml(abs(u('/')))}</link>
@@ -743,13 +829,34 @@ ${emitted.map((p) => {
 {
   fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(DIST, 'assets/tokens.css'), tokensCss(C));
-  for (const f of ['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
+  for (const f of ['theme.css', 'site.js', 'font-tester.js', 'comments.js', 'bookmarks.js', 'diagrams.js', 'random.js']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(DIST, 'assets', f));
   // Diagram library: only shipped when an article actually uses a ```mermaid block
   if (allArticles.some((a) => a.features.mermaid)) {
     const src = path.join(ROOT, 'node_modules/mermaid/dist/mermaid.min.js');
     if (!fs.existsSync(src)) fail('An article uses a mermaid diagram but the "mermaid" package is not installed. Run npm install.');
     fs.mkdirSync(path.join(DIST, 'assets/vendor'), { recursive: true });
     fs.copyFileSync(src, path.join(DIST, 'assets/vendor/mermaid.min.js'));
+  }
+  // Reading fonts (only downloaded by a browser when a reader picks them)
+  fs.mkdirSync(path.join(DIST, 'assets/fonts'), { recursive: true });
+  for (const [pkg, name] of [['atkinson-hyperlegible', 'atkinson'], ['opendyslexic', 'opendyslexic']]) {
+    for (const w of [400, 700]) {
+      const f = path.join(ROOT, `node_modules/@fontsource/${pkg}/files/${pkg}-latin-${w}-normal.woff2`);
+      if (fs.existsSync(f)) fs.copyFileSync(f, path.join(DIST, `assets/fonts/${name}-${w}.woff2`));
+    }
+  }
+  if (fs.existsSync(ogOut)) fs.cpSync(ogOut, path.join(DIST, 'images/_og'), { recursive: true });
+  if (offlineOn) {
+    const precache = ['/offline/', '/bookmarks/', C.logo.src, C.logo.favicon, '/icon-192.png', '/manifest.webmanifest', asset('tokens.css').replace(u(''), ''), asset('theme.css').replace(u(''), ''), asset('site.js').replace(u(''), ''), asset('bookmarks.js').replace(u(''), ''), asset('random.js').replace(u(''), '')].map((x) => u(x.startsWith('/') ? x : '/' + x));
+    const version = sha(JSON.stringify([assetVer, searchUrl, precache]));
+    fs.writeFileSync(path.join(DIST, 'sw.js'), fs.readFileSync(path.join(ROOT, 'src/sw.js'), 'utf8')
+      .replace('__VERSION__', version).replace('__SCOPE__', u('/')).replace('__OFFLINE__', u('/offline/')).replace('__PRECACHE__', JSON.stringify(precache)));
+  }
+  const cms = guard(() => cmsInfo(C, { repo, siteUrl }));
+  if (cms) {
+    fs.mkdirSync(path.join(DIST, 'admin'), { recursive: true });
+    fs.writeFileSync(path.join(DIST, 'admin/index.html'), adminHtml(C));
+    fs.writeFileSync(path.join(DIST, 'admin/config.yml'), adminConfig(C, { ...cms, base }));
   }
   if (fs.existsSync(path.join(cacheDir, '_opt'))) fs.cpSync(path.join(cacheDir, '_opt'), path.join(DIST, 'images/_opt'), { recursive: true });
   if (fs.existsSync(path.join(ROOT, 'public'))) fs.cpSync(path.join(ROOT, 'public'), DIST, { recursive: true });

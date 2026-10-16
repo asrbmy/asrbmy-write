@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns='http://www.w3.org/2005/Atom' xmlns:blogger='http://schemas.google.com/blogger/2018'>
+  <title>Old Blogger</title>
+  <entry>
+    <id>tag:blogger.com,1999:blog-1.post-2</id>
+    <blogger:type>POST</blogger:type>
+    <blogger:status>LIVE</blogger:status>
+    <blogger:filename>/2021/05/hello-blogger.html</blogger:filename>
+    <published>2021-05-06T08:00:00.000-07:00</published>
+    <title type='text'>Hello Blogger</title>
+    <content type='html'>&lt;p&gt;Hi &lt;b&gt;there&lt;/b&gt;&lt;/p&gt;&lt;p&gt;Second &amp;amp; third&lt;/p&gt;</content>
+    <category scheme='http://www.blogger.com/atom/ns#' term='Life'/>
+    <category scheme='http://www.blogger.com/atom/ns#' term='Travel'/>
+  </entry>
+  <entry>
+    <id>tag:blogger.com,1999:blog-1.post-3</id>
+    <blogger:type>POST</blogger:type>
+    <blogger:status>DRAFT</blogger:status>
+    <published>2021-06-06T08:00:00.000-07:00</published>
+    <title type='text'>Draft one</title>
+    <content type='html'>&lt;p&gt;Not yet&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:blogger.com,1999:blog-1.post-4</id>
+    <blogger:type>COMMENT</blogger:type>
+    <content type='html'>nice</content>
+  </entry>
+</feed>

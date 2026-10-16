@@ -14,7 +14,7 @@ let base = process.env.BASE_PATH ?? (ghRepo ? (ghName?.toLowerCase() === `${ghOw
 base = base && base !== '/' ? '/' + base.replace(/^\/+|\/+$/g, '') : '';
 
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
-const htmlFiles = walk(DIST).filter((f) => f.endsWith('.html'));
+const htmlFiles = walk(DIST).filter((f) => f.endsWith('.html') && !path.relative(DIST, f).startsWith('admin' + path.sep)); // /admin/ is the optional editor, not a site page
 
 const exists = (urlPath) => {
   let p;
@@ -89,8 +89,15 @@ for (const file of htmlFiles) {
   }
 }
 
-for (const f of ['rss.xml', 'sitemap.xml', 'search-index.json', 'robots.txt', '404.html', 'assets/theme.css', 'assets/tokens.css', 'assets/site.js']) {
+const offlineOn = cfg.offline?.enabled !== false;
+for (const f of ['rss.xml', 'sitemap.xml', 'search-index.json', 'robots.txt', '404.html', 'assets/theme.css', 'assets/tokens.css', 'assets/site.js', ...(offlineOn ? ['sw.js', 'offline/index.html'] : [])]) {
   if (!fs.existsSync(path.join(DIST, f))) problems.push(`missing ${f}`);
+}
+if (offlineOn && fs.existsSync(path.join(DIST, 'sw.js'))) {
+  const sw = fs.readFileSync(path.join(DIST, 'sw.js'), 'utf8');
+  if (/__[A-Z]+__/.test(sw.replace(/\/\/.*$/gm, ''))) problems.push('sw.js: placeholder left unfilled');
+  const list = (sw.match(/const PRECACHE = (\[.*\]);/) || [])[1];
+  try { for (const u of JSON.parse(list)) if (!exists((base && u.startsWith(base + '/') ? u.slice(base.length) : u).split('?')[0])) problems.push(`sw.js: precached file missing ${u}`); } catch { problems.push('sw.js: PRECACHE list is not valid'); }
 }
 try { JSON.parse(fs.readFileSync(path.join(DIST, 'search-index.json'), 'utf8')); } catch { problems.push('search-index.json is not valid JSON'); }
 

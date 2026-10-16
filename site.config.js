@@ -114,7 +114,17 @@ export default {
 
   // ── Contact page ───────────────────────────────────────────────────────────
   // Leave email empty to hide it. (There is no backend, so there is no form.)
-  contact: { email: '' },
+  // `email` is shown on the Contact page. To add a message form (no server needed), set form.enabled and give
+  // the address your form service gave you (Formspree: 'https://formspree.io/f/xxxxxxx'; Web3Forms, Getform and others work too).
+  // The form includes a "Suggest a topic" choice. Messages go straight to that service, never through this site.
+  contact: {
+    email: '',
+    form: {
+      enabled: false, action: '', next: '', // `next`: an https:// page to show after sending (optional)
+      topics: ['Question', 'Suggest a topic', 'Feedback', 'Report a problem'],
+      note: '',
+    },
+  },
 
   // ── Sidebar ────────────────────────────────────────────────────────────────
   sidebar: {
@@ -215,9 +225,37 @@ export default {
   // The Privacy page updates itself to say which one you use.
   analytics: { provider: '', domain: '', code: '', src: '' },
 
+  // ── Reader tools ───────────────────────────────────────────────────────────
+  // The "Aa" button in the header: text size, line width, an easy-read font, a dyslexia-friendly font
+  // and a high-contrast mode. Choices are saved in the reader's own browser only.
+  reader: { enabled: true },
+
+  // Offline reading: after a first visit the site works without a connection, and articles a reader
+  // taps "Save for later" on are stored for offline use. Everything stays in their browser.
+  offline: { enabled: true },
+
+  // ── Popular articles & view counts (optional; need GoatCounter analytics above) ─
+  // popular: a "Popular this month" block in the sidebar. It is fetched while the site builds, so
+  //   create a GoatCounter API token (Settings → API, with the "Statistics" permission) and save it as the
+  //   GitHub secret GOATCOUNTER_TOKEN (see the README). Without the token the block is simply left out.
+  // views: shows "1,234 views" on each article, using GoatCounter's public counter. In GoatCounter, turn on
+  //   Settings → "Allow adding visitor counts on your website".
+  popular: { enabled: false, days: 30, count: 4, title: 'Popular this month' },
+  views: { enabled: false },
+
+  // ── RSS feed ───────────────────────────────────────────────────────────────
+  // fullText: true puts the whole article in the feed (best for RSS-to-email services and feed readers).
+  feed: { fullText: false },
+
+  // ── Write from a browser (optional) ────────────────────────────────────────
+  // Adds /admin/, an editor that saves straight to your GitHub repository (works on a phone).
+  // Uses Sveltia CMS. Sign in there with a GitHub token. See the README, "Write from your phone".
+  cms: { enabled: false },
+
   // ── Search & social sharing ────────────────────────────────────────────────
   seo: {
     ogImage: '/og-default.png', // 1200×630, in /public. Used when a page has no image of its own.
+    autoImages: true, // make a share card (title on the site colours) for each article without a cover image
     locale: 'en_US',
     twitter: '', // e.g. '@yourhandle' (optional)
   },

@@ -54,6 +54,9 @@
           <div class="f"><label for="f-part">Part number</label><input id="f-part" type="number" min="1" step="1" inputmode="numeric"></div>
           <div class="f"><label for="f-cover">Cover image <small>(e.g. /images/cover.jpg)</small></label><input id="f-cover" placeholder="/images/…"></div>
           <div class="f"><label for="f-coveralt">Cover description <small>(for screen readers)</small></label><input id="f-coveralt"></div>
+          <div class="f" id="lang-box" hidden><label for="f-lang">Language <small>(also sets spell-check)</small></label><select id="f-lang"></select></div>
+          <div class="f" id="trans-box" hidden><label for="f-trans">Translation of <small>(slug of the original)</small></label><input id="f-trans" placeholder="original-article-slug"></div>
+          <div class="f f--checks f--inline"><label><input type="checkbox" id="f-best"> Show in “Best of”</label></div>
           <div class="f f--checks f--inline"><label><input type="checkbox" id="f-comments" checked> Allow comments (when enabled on the site)</label></div>
         </div>
         <p class="more__hint">A date in the future schedules the article: it stays hidden until that day.</p>
@@ -83,7 +86,7 @@
       <input type="file" id="img-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
     </div>
 
-    <div class="goalrow"><span class="goal" id="goal" hidden><progress id="goal-bar" max="100" value="0" aria-label="Progress toward your word goal"></progress><span id="goal-text"></span></span></div>
+    <div class="goalrow"><button type="button" class="readability" id="readability" hidden title="Reading level and long sentences — press for details"></button><span class="goal" id="goal" hidden><progress id="goal-bar" max="100" value="0" aria-label="Progress toward your word goal"></progress><span id="goal-text"></span></span></div>
 
     <div class="split" id="split" data-view="write">
       <textarea id="f-body" class="editor" spellcheck="true" placeholder="Start writing in Markdown…&#10;&#10;## A heading&#10;Paste or drop an image straight in."></textarea>
