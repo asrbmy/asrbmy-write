@@ -38,7 +38,7 @@ jobs:
           # Optional: lets the build fetch "Popular this month" from GoatCounter (see the README)
           GOATCOUNTER_TOKEN: ${{ secrets.GOATCOUNTER_TOKEN }}
       - run: npm run check
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
