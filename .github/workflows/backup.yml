@@ -1,0 +1,29 @@
+name: Weekly backup
+
+# Every Sunday, zip your writing (articles, pages, projects, images and settings) and keep it as a GitHub release.
+# Download the newest "backup-…" release from the Releases page if you ever need an older copy. The 8 newest are kept.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 2 * * 0'
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make the zip
+        run: |
+          STAMP=$(date -u +%Y-%m-%d)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          zip -r "backup-$STAMP.zip" content public site.config.js writer/writer.config.js -x '*.DS_Store'
+      - name: Publish it as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "backup-$STAMP" "backup-$STAMP.zip" --title "Backup $STAMP" --notes "Automatic weekly copy of the writing and settings." --latest=false || gh release upload "backup-$STAMP" "backup-$STAMP.zip" --clobber
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^backup-' | sort -r | tail -n +9 | while read -r tag; do gh release delete "$tag" --cleanup-tag --yes; done

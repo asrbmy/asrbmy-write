@@ -31,5 +31,30 @@
     clear.addEventListener('click', () => { if (confirm('Remove every saved article?')) { save([]); draw(); } });
     root.append(ul, clear);
   }
+  // Back up / restore the list as a small file (it lives only in this browser, so this is the way to move it)
+  const tools = document.getElementById('bookmarks-tools');
+  if (tools) {
+    const ex = document.createElement('button'); ex.type = 'button'; ex.className = 'share__btn'; ex.textContent = 'Export list';
+    ex.addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify({ asrbmy: 'reading-list', saved: load().filter(safe) }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'reading-list.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    const label = document.createElement('label'); label.className = 'share__btn'; label.textContent = 'Import list ';
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json'; inp.className = 'sr-only';
+    const msg = document.createElement('span'); msg.className = 'share__status'; msg.setAttribute('role', 'status');
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      try {
+        if (f.size > 1e6) throw new Error('big');
+        const j = JSON.parse(await f.text());
+        const incoming = (Array.isArray(j) ? j : j.saved || []).filter(safe).map((b) => ({ u: b.u, t: b.t.slice(0, 300), d: typeof b.d === 'string' ? b.d.slice(0, 10) : '' }));
+        const have = load(); const seen = new Set(have.map((b) => b.u));
+        const merged = have.concat(incoming.filter((b) => !seen.has(b.u))).slice(0, 200);
+        save(merged); draw(); msg.textContent = `Imported ${merged.length - have.length} article${merged.length - have.length === 1 ? '' : 's'}.`;
+      } catch { msg.textContent = 'That file is not a reading-list export.'; }
+      inp.value = '';
+    });
+    label.append(inp); tools.append(ex, label, msg);
+  }
   draw();
 })();

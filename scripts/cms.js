@@ -52,6 +52,14 @@ export function adminConfig(C, { repo, branch, siteUrl, base }) {
       - { label: Translation of (slug of the original), name: translationOf, widget: string, required: false }
       - { label: Featured, name: featured, widget: boolean, default: false, required: false }
       - { label: Best of, name: best, widget: boolean, default: false, required: false }
+      - { label: Short note (listed on the Notes page), name: type, widget: select, options: [{ label: Article, value: article }, { label: Note, value: note }], default: article, required: false }
+      - { label: Social preview text, name: social, widget: string, required: false }
+      - { label: One-page printable sheet, name: sheet, widget: boolean, default: false, required: false }
+      - { label: Ask "Was this helpful?", name: helpful, widget: boolean, default: true, required: false }
+      - { label: Rating (1-5, for reviews), name: rating, widget: number, value_type: float, min: 1, max: 5, required: false }
+      - { label: Item reviewed, name: reviewItem, widget: string, required: false }
+      - { label: Audio file (/audio/name.mp3), name: audio, widget: string, required: false }
+      - { label: What changed (one line each, starting with a date like 2026-10-01:), name: changes, widget: list, required: false }
       - { label: Comments, name: comments, widget: boolean, default: true, required: false }
       - { label: Draft (hidden until unticked), name: draft, widget: boolean, default: true, required: false }
       - { label: Body, name: body, widget: markdown }`;

@@ -8,6 +8,7 @@
     title: $('f-title'), slug: $('f-slug'), date: $('f-date'), cat: $('f-cat'), tags: $('f-tags'), excerpt: $('f-excerpt'),
     series: $('f-series'), part: $('f-part'), cover: $('f-cover'), coverAlt: $('f-coveralt'), comments: $('f-comments'),
     lang: $('f-lang'), trans: $('f-trans'), best: $('f-best'),
+    note: $('f-note'), sheet: $('f-sheet'), helpful: $('f-helpful'), rating: $('f-rating'), reviewItem: $('f-reviewitem'), social: $('f-social'), change: $('f-change'),
     featured: $('f-featured'), draft: $('f-draft'), body: $('f-body'), preview: $('preview'), info: $('info'),
     cTitle: $('c-title'), cExcerpt: $('c-excerpt'), split: $('split'), files: $('files'),
     save: $('btn-save'), del: $('btn-delete'), download: $('btn-download'),
@@ -29,7 +30,7 @@
   const send = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
   // ── Form <-> article ───────────────────────────────────────────────────────
-  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf'];
+  const EDITED = ['title', 'slug', 'date', 'category', 'tags', 'excerpt', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf', 'type', 'sheet', 'helpful', 'rating', 'reviewItem', 'social'];
   function collect() {
     const title = el.title.value.trim();
     return {
@@ -39,7 +40,16 @@
       series: el.series.value.trim(), seriesOrder: el.part.value ? Number(el.part.value) : '', cover: el.cover.value.trim(), coverAlt: el.coverAlt.value.trim(),
       comments: el.comments.checked, best: el.best.checked,
       lang: el.lang.value && el.lang.value !== (state.languages?.[0]?.code || '') ? el.lang.value : '', translationOf: el.trans.value.trim(),
+      type: el.note.checked ? 'note' : '', sheet: el.sheet.checked, helpful: el.helpful.checked, rating: el.rating.value ? Number(el.rating.value) : '', reviewItem: el.reviewItem.value.trim(), social: el.social.value.trim(),
+      ...pendingChange(),
     };
+  }
+  // "Log a change": adds a dated line to the article's changes and sets "updated" to today
+  function pendingChange() {
+    const text = el.change.value.replace(/\s+/g, ' ').trim();
+    if (!text) return {};
+    const old = Array.isArray(cur.extra.changes) ? cur.extra.changes : [];
+    return { updated: today(), changes: [...old, `${today()}: ${text}`] };
   }
   function fill(file, front, body) {
     cur = { file, extra: Object.fromEntries(Object.entries(front).filter(([k]) => !EDITED.includes(k))) };
@@ -48,6 +58,8 @@
     el.excerpt.value = front.excerpt || ''; el.featured.checked = front.featured === true; el.draft.checked = front.draft === true;
     el.series.value = front.series || ''; el.part.value = front.seriesOrder || ''; el.cover.value = front.cover || ''; el.coverAlt.value = front.coverAlt || '';
     el.comments.checked = front.comments !== false; el.best.checked = front.best === true;
+    el.note.checked = front.type === 'note'; el.sheet.checked = front.sheet === true; el.helpful.checked = front.helpful !== false;
+    el.rating.value = front.rating || ''; el.reviewItem.value = front.reviewItem || ''; el.social.value = front.social || ''; el.change.value = '';
     el.lang.value = front.lang || (state.languages?.[0]?.code || ''); el.trans.value = front.translationOf || ''; spellLang();
     el.body.value = body || '';
     slugTouched = !!file;
@@ -70,11 +82,12 @@
     // A brand-new article is only created once it has a sensible title and some text (no files named "ab.md").
     if (!cur.file && !manual && (front.title.length < 3 || !el.body.value.trim())) return false;
     clearTimeout(saveTimer);
-    const target = cur, version = edits, body = el.body.value;
+    const target = cur, version = edits, body = el.body.value, pendingText = el.change.value.trim();
     say('Saving…');
     const run = (async () => {
       const r = target.file ? await send(`/api/articles/${encodeURIComponent(target.file)}`, 'PUT', { front, body })
         : await send('/api/articles', 'POST', { front, body });
+      if (front.changes && cur === target) { target.extra.changes = front.changes; target.extra.updated = front.updated; if (el.change.value.trim() === pendingText) el.change.value = ''; }
       target.file = r.file; // always the article that was saved, even if the user has since switched to another one
       if (cur === target) {
         el.slug.value = r.slug;
@@ -168,16 +181,46 @@
     table: () => block('| Column A | Column B |\n| --- | --- |\n| One | Two |\n', 'Column A'),
     faq: () => block('<details class="faq">\n<summary>Question?</summary>\n\nAnswer.\n\n</details>\n', 'Question?'),
     image: () => $('img-input').click(),
+    footnote: () => {
+      const v = el.body.value, s = el.body.selectionStart, e = el.body.selectionEnd;
+      const n = Math.max(0, ...[...v.matchAll(/\[\^(\d+)\]/g)].map((x) => Number(x[1]))) + 1;
+      const def = `\n\n[^${n}]: Note text`;
+      const at = v.replace(/\s+$/, '').length;
+      el.body.focus(); el.body.setSelectionRange(at, v.length);
+      document.execCommand('insertText', false, def) || el.body.setRangeText(def, at, v.length, 'end');
+      const ref = `[^${n}]`;
+      insert(s, e, ref, s + ref.length);
+      const from = el.body.value.indexOf(`[^${n}]: `, s + ref.length) + `[^${n}]: `.length;
+      el.body.setSelectionRange(from, from + 'Note text'.length);
+    },
   };
   $('toolbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-act]'); if (b) ACTIONS[b.dataset.act](); });
 
+  // Big photos slow a site down: shrink to at most 1600px wide and re-encode (JPEG stays JPEG; PNG becomes WebP). Used only if it is smaller.
+  async function compressImage(file) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 250 * 1024) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 1600 / bmp.width), w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(bmp, 0, 0, w, h); bmp.close && bmp.close();
+      const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
+      const blob = await new Promise((r) => cv.toBlob(r, type, 0.85));
+      if (!blob || blob.type !== type || blob.size >= file.size * 0.95) return file;
+      const ext = type === 'image/jpeg' ? '.jpg' : '.webp';
+      const out = new File([blob], (file.name || 'image').replace(/\.[a-z0-9]+$/i, '') + ext, { type });
+      out.note = `${(file.size / 1048576).toFixed(1)} MB → ${Math.max(1, Math.round(blob.size / 1024))} KB`;
+      return out;
+    } catch { return file; }
+  }
   async function uploadImage(file) {
     say('Saving image…');
     try {
+      file = await compressImage(file);
       const r = await api(`/api/images?name=${encodeURIComponent(file.name || 'image')}`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
       const alt = 'Describe the image', s = el.body.selectionStart;
       insert(s, el.body.selectionEnd, `![${alt}](${r.url})`, s + 2, s + 2 + alt.length);
-      say(`Image saved as ${r.name} — upload it to your site's public/images folder too.`, 'ok');
+      say(`Image saved as ${r.name}${file.note ? ` (smaller: ${file.note})` : ''} — upload it to your site's public/images folder too.`, 'ok');
     } catch (e) { say(e.message, 'err'); }
   }
   $('img-input').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) uploadImage(f); e.target.value = ''; });
@@ -189,7 +232,7 @@
   el.title.addEventListener('input', () => { if (!slugTouched) el.slug.value = slugify(el.title.value); changed(); });
   el.slug.addEventListener('input', () => { slugTouched = el.slug.value.trim() !== ''; changed(); });
   $('meta').addEventListener('submit', (e) => e.preventDefault());
-  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body', 'series', 'part', 'cover', 'coverAlt', 'comments', 'best', 'trans']) el[k].addEventListener('input', changed);
+  for (const k of ['date', 'cat', 'tags', 'excerpt', 'featured', 'draft', 'body', 'series', 'part', 'cover', 'coverAlt', 'comments', 'best', 'trans', 'note', 'sheet', 'helpful', 'rating', 'reviewItem', 'social', 'change']) el[k].addEventListener('input', changed);
   el.filter.addEventListener('input', drawList);
   el.save.addEventListener('click', () => save(true));
   $('btn-new').addEventListener('click', newArticle);
@@ -316,6 +359,8 @@
         ? `${r.changes.length} new or changed file${r.changes.length === 1 ? '' : 's'} will be sent to “${r.remote}” (${r.branch}). GitHub Pages then rebuilds the site.`
         : 'Nothing new to publish.';
       for (const c of r.changes) { const li = document.createElement('li'); li.textContent = `${c.state} ${c.file}`; $('pub-list').append(li); }
+      const warns = checkSummary();
+      if (warns) $('pub-sum').textContent += ` The checklist found ${warns} thing${warns === 1 ? '' : 's'} to look at (press “Checklist” in the editor).`;
       const first = list.find((a) => a.file === cur.file);
       $('pub-msg').value = `Add article: ${first ? first.title : el.title.value || 'new writing'}`;
     } catch (e) { $('pub-sum').textContent = e.message; }
@@ -328,6 +373,107 @@
       $('pub-sum').textContent = r.ok ? (r.nothing ? 'Nothing new to publish.' : 'Published. The site updates in about a minute.') : `Stopped at “git ${r.step}”. Details below.`;
       say(r.ok ? 'Published.' : 'Publishing failed — see details.', r.ok ? 'ok' : 'err');
     } catch (e) { $('pub-sum').textContent = e.message; }
+  });
+
+  // ── Checklist: things worth fixing before publishing ───────────────────────
+  const mask = (md) => md.replace(/```[\s\S]*?```/g, (m) => ' '.repeat(m.length)).replace(/`[^`\n]*`/g, (m) => ' '.repeat(m.length));
+  function checklist() {
+    const f = collect(), body = el.body.value, text = mask(body), out = [];
+    const add = (level, msg) => out.push({ level, msg });
+    const t = f.title.length;
+    t >= 20 && t <= 70 ? add('ok', `Title is ${t} characters.`) : add('warn', t ? `The title is ${t} characters. 20–70 reads well in search results.` : 'Add a title.');
+    const x = f.excerpt.length;
+    x >= 70 && x <= 170 ? add('ok', 'Excerpt length is good.') : add('warn', x ? `The excerpt is ${x} characters. About 120–160 works best in search results.` : 'Write an excerpt: it is what people see in search results and shares.');
+    f.tags.length ? (f.tags.length > 8 ? add('warn', `${f.tags.length} tags is a lot. 2–5 is easier to browse.`) : add('ok', `${f.tags.length} tag${f.tags.length === 1 ? '' : 's'}.`)) : add('warn', 'Add at least one tag so readers can find related articles.');
+    f.cover ? (f.coverAlt ? add('ok', 'Cover image has a description.') : add('warn', 'The cover image has no description for screen readers.')) : add('info', 'No cover image. That is fine; the site makes a share card for you.');
+    const words = body.trim() ? body.trim().split(/\s+/).length : 0;
+    if (f.type !== 'note') words >= 300 ? add('ok', `${words} words.`) : add('info', `Only ${words} words. Mark it as a short note, or add more.`);
+    const noAlt = [...text.matchAll(/!\[([^\]]*)\]\(/g)].filter((m) => !m[1].trim() || /^describe the image$/i.test(m[1].trim())).length;
+    noAlt ? add('warn', `${noAlt} image${noAlt === 1 ? ' has' : 's have'} no description (alt text). Screen readers cannot say what they show.`) : /!\[/.test(text) ? add('ok', 'All images are described.') : 0;
+    const left = [...text.matchAll(/\b(TODO|FIXME|XXX|lorem ipsum)\b|\]\(https:\/\/\)|\]\(\)|\]\(#\)/gi)].map((m) => m[0]);
+    left.length ? add('warn', `Unfinished bits left in the text: ${[...new Set(left)].slice(0, 4).join(', ')}.`) : add('ok', 'No TODO or empty links.');
+    const http = [...text.matchAll(/\]\((http:\/\/[^)\s]+)/g)].length;
+    if (http) add('warn', `${http} link${http === 1 ? ' uses' : 's use'} http:// instead of https://.`);
+    const slugs = new Map(list.map((a) => [a.slug, a]));
+    const dead = [...text.matchAll(/\]\(\/(?:[a-z]{2,3}\/)?articles\/([^/)\s#]+)\/?/g)].map((m) => m[1]).filter((sl) => !slugs.has(sl));
+    dead.length ? add('warn', `Links to articles that do not exist here: ${[...new Set(dead)].join(', ')}.`) : 0;
+    const levels = [...text.matchAll(/^(#{1,6})\s+\S/gm)].map((m) => m[1].length);
+    if (levels.includes(1)) add('warn', 'A “#” heading in the text becomes a second page title. Use “##”.');
+    let prev = 1; let skip = false; for (const l of levels) { if (l > prev + 1) skip = true; prev = l; }
+    skip ? add('warn', 'Heading levels skip (for example ## then ####). Screen readers use them to navigate.') : levels.length ? add('ok', 'Headings are in order.') : words > 600 ? add('info', 'A long article reads better with ## headings.') : 0;
+    if (f.draft) add('warn', 'This is still marked as a draft, so it will not appear on the website.');
+    else if (f.date > today()) add('info', `Scheduled: it goes live on ${f.date} (the daily build publishes it).`);
+    if (f.lang && f.lang !== (state.languages?.[0]?.code || '') && !f.translationOf) add('info', 'This is in another language. Set “Translation of” so readers can switch between versions.');
+    if (f.rating && !f.reviewItem) add('info', 'A rating is set but “Item reviewed” is empty.');
+    return out;
+  }
+  const openTool = (title, build) => { $('tool-title').textContent = title; const b = $('tool-body'); b.textContent = ''; build(b); $('tool').showModal(); };
+  const checkSummary = () => { const w = checklist().filter((x) => x.level === 'warn').length; return w; };
+  $('btn-check').addEventListener('click', () => openTool('Checklist', (b) => {
+    const ul = document.createElement('ul'); ul.className = 'tool-list';
+    for (const c of checklist()) { const li = document.createElement('li'); li.className = `is-${c.level}`; li.textContent = `${{ ok: '✓', warn: '!', info: 'i' }[c.level]}  ${c.msg}`; ul.append(li); }
+    b.append(ul);
+  }));
+
+  // ── Link ideas: your own articles that this one mentions or relates to ─────
+  function linkIdeas() {
+    const body = el.body.value, text = mask(body).replace(/!?\[[^\]]*\]\([^)]*\)/g, (m) => ' '.repeat(m.length));
+    const f = collect(), mainLang = state.languages?.[0]?.code || '';
+    const urlOf = (a) => `/${a.lang && a.lang !== mainLang ? a.lang + '/' : ''}articles/${a.slug}/`;
+    const linked = new Set([...body.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1].replace(/#.*/, '')));
+    const mentions = [], related = [];
+    for (const a of list) {
+      if (a.file === cur.file || a.slug === f.slug || a.draft || linked.has(urlOf(a))) continue;
+      const i = a.title.length >= 8 ? text.toLowerCase().indexOf(a.title.toLowerCase()) : -1;
+      if (i >= 0) { mentions.push({ a, at: i, phrase: body.slice(i, i + a.title.length) }); continue; }
+      const shared = a.tags.filter((t) => f.tags.map((x) => x.toLowerCase()).includes(String(t).toLowerCase())).length + (a.category && a.category === f.category ? 1 : 0);
+      if (shared) related.push({ a, shared });
+    }
+    related.sort((x, y) => y.shared - x.shared || String(y.a.date).localeCompare(String(x.a.date)));
+    return { mentions: mentions.slice(0, 6), related: related.slice(0, 6), urlOf };
+  }
+  $('btn-links').addEventListener('click', () => openTool('Link ideas', (b) => {
+    const { mentions, related, urlOf } = linkIdeas();
+    const sec = (title, items, mk) => {
+      const h = document.createElement('h3'); h.textContent = title; b.append(h);
+      if (!items.length) { const p = document.createElement('p'); p.textContent = 'Nothing to suggest.'; b.append(p); return; }
+      const ul = document.createElement('ul'); ul.className = 'tool-list';
+      for (const it of items) { const li = document.createElement('li'); mk(li, it); ul.append(li); }
+      b.append(ul);
+    };
+    sec('Your text already names these articles', mentions, (li, it) => {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'Link it';
+      btn.addEventListener('click', () => { const i = el.body.value.toLowerCase().indexOf(it.phrase.toLowerCase()); if (i < 0) return; insert(i, i + it.phrase.length, `[${it.phrase}](${urlOf(it.a)})`); btn.disabled = true; btn.textContent = 'Linked'; });
+      li.append(`“${it.phrase}” `, btn);
+    });
+    sec('Related by topic: add a “See also”', related, (li, it) => {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'Insert link';
+      btn.addEventListener('click', () => { const s = el.body.selectionStart; insert(s, el.body.selectionEnd, `[${it.a.title}](${urlOf(it.a)})`); btn.disabled = true; btn.textContent = 'Inserted at the cursor'; });
+      li.append(`${it.a.title} `, Object.assign(document.createElement('small'), { textContent: `· ${it.a.category}` }), ' ', btn);
+    });
+  }));
+
+  // ── Versions: earlier saves of this article ────────────────────────────────
+  $('btn-history').addEventListener('click', async () => {
+    if (!cur.file) { say('Save the article first; versions start from the second save.', 'err'); return; }
+    let versions = [];
+    try { versions = await api(`/api/history/${encodeURIComponent(cur.file)}`); } catch (e) { say(e.message, 'err'); return; }
+    openTool('Earlier versions', (b) => {
+      const p = document.createElement('p'); p.textContent = versions.length ? 'The text as it was before a save (at most one a minute). Restoring puts it in the editor; nothing changes until you save.' : 'No earlier versions yet. One is kept each time you save over a changed article.'; b.append(p);
+      const ul = document.createElement('ul'); ul.className = 'tool-list';
+      for (const v of versions) {
+        const li = document.createElement('li'), btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'Restore';
+        btn.addEventListener('click', async () => {
+          try {
+            const r = await api(`/api/history/${encodeURIComponent(cur.file)}/${v.id}`);
+            const file = cur.file; fill(file, r.front, r.body); changed(); renderPreview(); $('tool').close(); say('Earlier version loaded. Press Save to keep it.', 'ok');
+          } catch (e) { say(e.message, 'err'); }
+        });
+        li.append(`${new Date(v.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${v.words} words · ${v.title} `, btn); ul.append(li);
+      }
+      b.append(ul);
+    });
   });
 
   // ── Start ──────────────────────────────────────────────────────────────────

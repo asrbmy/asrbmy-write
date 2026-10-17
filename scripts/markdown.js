@@ -131,7 +131,7 @@ export function sanitizeHtml(html, fixHref = (h) => h) {
   return out + text(html.slice(last));
 }
 
-const RESERVED_ID = /^(main|site-nav|q|side-q|theme-toggle|menu-btn|search-.*|sub-\d+|h-(featured|latest|related)|y-\d{4}|comments|load-comments|giscus-box|read-progress|toc-side|h-comments|h-toc-side|h-series|series-box|ft-.*)$/;
+const RESERVED_ID = /^(main|fn-.*|fnref-.*|site-nav|q|side-q|theme-toggle|menu-btn|search-.*|sub-\d+|h-(featured|latest|related)|y-\d{4}|comments|load-comments|giscus-box|read-progress|toc-side|h-comments|h-toc-side|h-series|series-box|ft-.*)$/;
 
 /**
  * Render markdown to HTML.
@@ -154,6 +154,7 @@ export function renderMarkdown(md, { base = '', vars = {}, images = null } = {})
   const fixImage = (href) => fixHref(href.replace(/^(?:\.{1,2}\/)*(?:public\/)?(images\/)/, '/$1'));
 
   const marked = new Marked({ gfm: true, breaks: false });
+  const notes = new Map(), order = [], refCount = new Map();
 
   // $inline$ and $$block$$ maths, rendered at build time as MathML (no scripts, fonts or inline styles needed)
   const tex = (src, displayMode) => {
@@ -165,6 +166,32 @@ export function renderMarkdown(md, { base = '', vars = {}, images = null } = {})
   const VIDEO = /^@\[(youtube|vimeo)\]\(\s*([\w-]{3,24})(?:\s+"([^"\n]{0,120})")?\s*\)[ \t]*(?:\n|$)/;
   marked.use({
     extensions: [
+      {
+        // Footnotes: text[^1] in the sentence, and a line "[^1]: The note." anywhere (later lines indented by 2 spaces continue it)
+        name: 'footnoteDef', level: 'block',
+        start: (src) => src.search(/^\[\^[\w-]+\]:/m),
+        tokenizer(src) {
+          const m = /^\[\^([\w-]{1,40})\]:[ \t]*([^\n]*(?:\n(?: {2,}|\t)[^\n]*)*)(?:\n|$)/.exec(src);
+          if (!m) return;
+          if (!notes.has(m[1])) notes.set(m[1], m[2].replace(/\n[ \t]+/g, ' ').trim());
+          return { type: 'footnoteDef', raw: m[0] };
+        },
+        renderer: () => '',
+      },
+      {
+        name: 'footnoteRef', level: 'inline',
+        start: (src) => src.indexOf('[^'),
+        tokenizer(src) {
+          const m = /^\[\^([\w-]{1,40})\]/.exec(src);
+          if (m && notes.has(m[1])) return { type: 'footnoteRef', raw: m[0], id: m[1] };
+        },
+        renderer: (t) => {
+          let n = order.indexOf(t.id);
+          if (n < 0) { order.push(t.id); n = order.length - 1; }
+          const k = (refCount.get(t.id) || 0) + 1; refCount.set(t.id, k);
+          return `<sup class="fnref"><a href="#fn-${t.id}" id="fnref-${t.id}${k > 1 ? '-' + k : ''}" aria-label="Footnote ${n + 1}">${n + 1}</a></sup>`;
+        },
+      },
       {
         name: 'mathBlock', level: 'block',
         start: (src) => src.indexOf('$$'),
@@ -263,6 +290,12 @@ export function renderMarkdown(md, { base = '', vars = {}, images = null } = {})
   });
 
   let html = marked.parse(md);
+  if (order.length) {
+    html += `<section class="footnotes" aria-labelledby="fn-title"><h2 id="fn-title" class="footnotes__title">Notes</h2><ol>${order.map((id) => {
+      const backs = Array.from({ length: refCount.get(id) || 1 }, (_, i) => `<a class="fn-back" href="#fnref-${id}${i ? '-' + (i + 1) : ''}" aria-label="Back to the text${i ? ' (' + (i + 1) + ')' : ''}">↩</a>`).join(' ');
+      return `<li id="fn-${id}">${marked.parseInline(notes.get(id))} ${backs}</li>`;
+    }).join('')}</ol></section>\n`;
+  }
   html = html.replace(/<table>/g, '<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table>').replace(/<\/table>/g, '</table></div>');
   return { html, toc, features };
 }

@@ -9,6 +9,7 @@ import { createTemplates, icon } from './templates.js';
 import { optimiseImages } from './images.js';
 import { analyticsInfo, contactInfo, viewsInfo, fetchPopular } from './features.js';
 import { makeCards } from './og.js';
+import { rssXml, atomXml, jsonFeed } from './feeds.js';
 import { cmsInfo, adminHtml, adminConfig } from './cms.js';
 import { tokensCss, resolveTypography } from './tokens.js';
 import { fontPresets, fontFamilies } from '../fonts.config.js';
@@ -133,6 +134,12 @@ function applyGlossary(html) {
   }).join('');
 }
 
+const audioPath = (v, where) => {
+  if (!v) return '';
+  const c = cleanUrl(String(v));
+  if (c === null || !/^(\/audio\/[\w./%-]+|https:\/\/[^\s"'<>]+)$/i.test(c) || !/\.(mp3|m4a|ogg|wav|opus|aac)(\?.*)?$/i.test(c)) fail(`${where}: "audio" must be a file under /audio/ (put it in public/audio) or an https:// address ending in .mp3, .m4a, .ogg, .wav or .opus`);
+  return c;
+};
 const allArticles = [];
 for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') && !f.startsWith('.')).sort()) {
   const src = fs.readFileSync(path.join(articleDir, file), 'utf8');
@@ -166,6 +173,15 @@ for (const file of fs.readdirSync(articleDir).filter((f) => f.endsWith('.md') &&
     cover: coverPath(fm.cover, where), coverAlt: fm.coverAlt ? String(fm.coverAlt) : '',
     series: fm.series ? String(fm.series).trim() : '', seriesOrder: fm.seriesOrder !== undefined && fm.seriesOrder !== '' && Number.isFinite(Number(fm.seriesOrder)) ? Number(fm.seriesOrder) : null,
     comments: fm.comments !== false,
+    kind: String(fm.type || '').toLowerCase() === 'note' ? 'note' : '',
+    social: fm.social ? String(fm.social).slice(0, 300) : '',
+    changes: (Array.isArray(fm.changes) ? fm.changes : fm.changes ? [fm.changes] : []).map((c) => { const m = /^\s*(\d{4}-\d{2}-\d{2})\s*[:\-–—]?\s*(.+)$/.exec(String(c)); return m && validDate(m[1]) ? { date: m[1], text: m[2].trim() } : (console.warn(`! ${where}: a "changes" line must look like "2026-04-26: What changed" (got "${c}")`), null); }).filter(Boolean).sort((x, y) => y.date.localeCompare(x.date)),
+    rating: Number.isFinite(Number(fm.rating)) && Number(fm.rating) >= 1 && Number(fm.rating) <= 5 ? Math.round(Number(fm.rating) * 2) / 2 : 0,
+    reviewItem: fm.reviewItem ? String(fm.reviewItem).slice(0, 160) : '',
+    sheet: fm.sheet === true,
+    helpful: fm.helpful !== false,
+    audio: audioPath(fm.audio, where), audioTitle: fm.audioTitle ? String(fm.audioTitle).slice(0, 120) : '',
+    chapters: (Array.isArray(fm.chapters) ? fm.chapters : []).map((c) => { const m = /^\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s+(.+)$/.exec(String(c)); return m ? { at: (Number(m[1] || 0) * 3600) + Number(m[2]) * 60 + Number(m[3]), label: m[4].trim().slice(0, 100) } : null; }).filter(Boolean),
     readingTime: Number(fm.readingTime) || Math.max(1, Math.round(text.split(/\s+/).length / 220)),
   });
 }
@@ -271,6 +287,7 @@ const hasRoute = (href) => {
   if ((m = href.match(/^\/categories\/([^/]+)\/?$/))) return categories.some((c) => c.slug === m[1]);
   if ((m = href.match(/^\/tags\/([^/]+)\/?$/))) return tags.some((t) => t.slug === m[1]);
   if (href === '/best/') return bestList.length > 0;
+  if (href === '/notes/') return articles.some((a) => a.kind === 'note');
   if (href === '/projects/') return projects.length > 0;
   if (href === '/glossary/') return glossary.length > 0;
   if (href === '/series/') return seriesList.length > 0;
@@ -330,6 +347,8 @@ fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 const emitted = [];
 const written = new Set();
+const topicFeedOn = C.feed?.perTopic !== false;
+const topicFeed = (p, name) => topicFeedOn ? `<p class="topicfeed">${icon('rss')} <a href="${u(p)}">Follow “${esc(name)}” by RSS</a></p>` : '';
 function emit(sitePath, content, { sitemap = true } = {}) {
   const file = sitePath.endsWith('/') ? `${sitePath}index.html` : sitePath;
   if (written.has(file)) fail(`Two pages want the same address (${sitePath}). Rename the page in content/pages or the article slug.`);
@@ -397,8 +416,9 @@ ${panelHead({ kicker: 'Browse by topic', title: 'Categories', lede: 'Writing gro
     const b = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Category', title: c.name, lede: esc(c.description || `${c.count} article${c.count === 1 ? '' : 's'} filed under ${c.name}.`) })}
 <div class="cards">${c.articles.map((a) => T.articleCard(a)).join('')}</div>
+${topicFeed(`/categories/${c.slug}/rss.xml`, c.name)}
 </section>`;
-    emit(`/categories/${c.slug}/`, T.page({ title: c.name, path: u(`/categories/${c.slug}/`), body: b,
+    emit(`/categories/${c.slug}/`, T.page({ title: c.name, feed: topicFeedOn ? `/categories/${c.slug}/rss.xml` : '', path: u(`/categories/${c.slug}/`), body: b,
       crumbs: [homeCrumb, { label: 'Categories', href: '/categories/' }, { label: c.name }], description: c.description || `${c.name} articles from ${C.name}.` }));
   }
 }
@@ -416,8 +436,9 @@ ${panelHead({ kicker: 'Browse by tag', title: 'Tags', lede: 'Smaller topics that
     const b = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Tag', title: `#${t.name}`, lede: `${t.count} article${t.count === 1 ? '' : 's'} tagged “${esc(t.name)}”.` })}
 <div class="cards">${t.articles.map((a) => T.articleCard(a)).join('')}</div>
+${topicFeed(`/tags/${t.slug}/rss.xml`, t.name)}
 </section>`;
-    emit(`/tags/${t.slug}/`, T.page({ title: `#${t.name}`, path: u(`/tags/${t.slug}/`), body: b,
+    emit(`/tags/${t.slug}/`, T.page({ title: `#${t.name}`, feed: topicFeedOn ? `/tags/${t.slug}/rss.xml` : '', path: u(`/tags/${t.slug}/`), body: b,
       crumbs: [homeCrumb, { label: 'Tags', href: '/tags/' }, { label: t.name }], description: `Articles tagged ${t.name}.`, noindex: t.count < 3 }), { sitemap: false });
   }
 }
@@ -599,7 +620,15 @@ allArticles.forEach((a) => {
   const sideToc = a.toc.length >= 3 ? `<nav class="side-toc" id="toc-side" aria-labelledby="h-toc-side"><h2 class="side-title" id="h-toc-side">On this page</h2><ol>${a.toc.map((h) => `<li class="toc__d${h.depth}"><a href="#${h.id}">${esc(h.text)}</a></li>`).join('')}</ol></nav>` : '';
   const toc = a.toc.length >= 3
     ? `<details class="toc" open><summary>Table of Contents</summary><ol class="toc__list">${a.toc.map((h) => `<li class="toc__d${h.depth}"><a href="#${h.id}">${esc(h.text)}</a></li>`).join('')}</ol></details>` : '';
-  const body = `<article class="panel panel--top article">
+  const fmtTime = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  const audioBlock = a.audio ? `<section class="audio" aria-label="Listen to this article">
+    <audio controls preload="none" src="${esc(/^\//.test(a.audio) ? u(a.audio) : a.audio)}" aria-label="${esc(a.audioTitle || a.title)}"></audio>
+    ${a.chapters.length ? `<ol class="audio__chapters">${a.chapters.map((c) => `<li><button type="button" data-seek="${c.at}"><time>${fmtTime(c.at)}</time> ${esc(c.label)}</button></li>`).join('')}</ol>` : ''}
+  </section>` : '';
+  const changesBlock = a.changes.length ? `<details class="changes"><summary>What changed in this article <span>(${a.changes.length})</span></summary><ul>${a.changes.map((c) => `<li><time datetime="${c.date}">${fmtDate(c.date)}</time> ${esc(c.text)}</li>`).join('')}</ul></details>` : '';
+  const stars = a.rating ? `<span class="byline__item stars" role="img" aria-label="Rated ${a.rating} out of 5">${'★'.repeat(Math.floor(a.rating))}${a.rating % 1 ? '½' : ''}<span aria-hidden="true" class="stars__off">${'★'.repeat(5 - Math.ceil(a.rating))}</span> <small>${a.rating}/5${a.reviewItem ? ` · ${esc(a.reviewItem)}` : ''}</small></span>` : '';
+  const helpfulBlock = a.helpful && C.helpful?.enabled !== false && a.kind !== 'note' ? `<aside class="helpful" data-helpful="${esc(a.url)}" aria-labelledby="h-helpful"><h2 id="h-helpful" class="helpful__q">Was this helpful?</h2><div class="helpful__btns"><button type="button" data-vote="yes">Yes</button><button type="button" data-vote="no">Not really</button></div><p class="helpful__msg" role="status" aria-live="polite" hidden></p><p class="helpful__more" hidden>${C.contact ? `<a href="${u('/contact/')}">Tell me what was missing</a>` : ''}</p></aside>` : '';
+  const body = `<article class="panel panel--top article${a.kind === 'note' ? ' article--note' : ''}${a.sheet ? ' article--sheet' : ''}" data-slug="${esc(a.slug)}">
   <header class="panel__head">
     <p class="kicker">${T.catLink(a.category)}</p>
     <h1 class="title">${esc(a.title)}</h1>
@@ -610,6 +639,7 @@ allArticles.forEach((a) => {
       <span class="byline__item">${authorPage ? `<a href="${u(authorPage)}" rel="author">${esc(a.author)}</a>` : esc(a.author)}</span>
       <span class="byline__item"><time datetime="${a.date}">${fmtDate(a.date)}</time></span>
       <span class="byline__item">${a.readingTime} min read</span>
+      ${stars}
       ${vInfo?.views ? `<span class="byline__item" data-views="${esc(`${vInfo.origin}/counter/${encodeURIComponent(u(a.url))}.json`)}" hidden></span>` : ''}
       ${a.status ? `<span class="byline__item"><span class="chip chip--warn">${a.status === 'draft' ? 'Draft' : 'Scheduled'}</span></span>` : ''}
       ${a.updated ? `<span class="byline__item">Updated <time datetime="${a.updated}">${fmtDate(a.updated)}</time></span>` : ''}
@@ -618,8 +648,11 @@ allArticles.forEach((a) => {
   </header>
   <hr class="rule">
   ${series}
+  ${audioBlock}
   ${toc}
   <div class="prose">${a.html}</div>
+  ${changesBlock}
+  ${helpfulBlock}
   ${T.shareBar(a)}
   ${T.hasNewsletter ? T.newsletterForm('article') : ''}
   ${upNext ? `<aside class="upnext" aria-labelledby="h-upnext"><h2 class="upnext__k" id="h-upnext">${upNextKind}</h2><a class="upnext__card" href="${u(upNext.url)}"><span class="upnext__title">${esc(upNext.title)}</span><span class="upnext__ex">${esc(upNext.excerpt)}</span><span class="upnext__meta">${esc(upNext.category)} · ${upNext.readingTime} min read ${icon('arrow', 14)}</span></a></aside>` : ''}
@@ -632,7 +665,7 @@ allArticles.forEach((a) => {
 </article>`;
   emit(a.url, T.page({
     title: a.title, path: u(a.url), body, description: a.excerpt, bodyClass: `is-article${sideToc ? ' has-side-toc' : ''}`,
-    progress: true, readMin: a.readingTime, sideExtra: sideToc, ogImage: (shareable(a.cover) ? a.cover : a.autoOg) || undefined, lang: a.lang, features: a.features,
+    progress: true, readMin: a.readingTime, social: a.social, media: /^https:/.test(a.audio) ? [new URL(a.audio).origin] : [], sideExtra: sideToc, ogImage: (shareable(a.cover) ? a.cover : a.autoOg) || undefined, lang: a.lang, features: a.features,
     alternates: [a, ...a.alternates], scripts: [...(commentsOn ? ['comments.js'] : []), ...(a.features.mermaid ? ['diagrams.js'] : [])],
     article: { published: a.date, modified: a.updated || a.date, section: a.category, tags: a.tags },
     crumbs: [homeCrumb, { label: 'Writing', href: '/writing/' }, { label: a.title }],
@@ -641,6 +674,7 @@ allArticles.forEach((a) => {
       datePublished: a.date, dateModified: a.updated || a.date, author: { '@type': 'Person', name: a.author, ...(authorPage ? { url: abs(u(authorPage)) } : {}) }, inLanguage: a.lang,
       mainEntityOfPage: { '@type': 'WebPage', '@id': abs(u(a.url)) }, keywords: a.tags.join(', '), articleSection: a.category,
       wordCount: a.text.split(/\s+/).length, image: shareable(a.cover) ? abs(S.imgSrc(a.cover)) : a.autoOg ? abs(u(a.autoOg)) : abs(u(C.seo?.ogImage || '/og-default.png')),
+      ...(a.rating ? { review: { '@type': 'Review', reviewRating: { '@type': 'Rating', ratingValue: a.rating, bestRating: 5, worstRating: 1 }, author: { '@type': 'Person', name: a.author }, itemReviewed: { '@type': 'Thing', name: a.reviewItem || a.title } } } : {}),
       ...(si ? { isPartOf: { '@type': 'CreativeWorkSeries', name: si.name, url: abs(u(`/series/${si.slug}/`)) }, position: si.index + 1 } : {}),
       publisher: { '@type': 'Organization', name: C.name, logo: { '@type': 'ImageObject', url: abs(u('/icon-512.png')) } },
     }, ...(faqEntities(a.html).length ? [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqEntities(a.html) }] : [])],
@@ -654,6 +688,35 @@ ${panelHead({ kicker: 'Start here', title: 'Best of', lede: 'The articles worth 
 <div class="cards">${bestList.map((a) => T.articleCard(a)).join('')}</div>
 </section>`;
   emit('/best/', T.page({ title: 'Best of', path: u('/best/'), body, crumbs: [homeCrumb, { label: 'Best of' }], description: `The best articles on ${C.name}, chosen by the author.` }));
+}
+
+// ── Notes (short posts: `type: note` in the front matter) ───────────────────
+{
+  const notes = articles.filter((a) => a.kind === 'note');
+  if (notes.length) {
+    const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'Short posts', title: 'Notes', lede: 'Quick thoughts and links that do not need a full article.' })}
+<ul class="notes">${notes.map((a) => `<li id="n-${esc(a.slug)}"><div class="prose">${a.html.replace(/(\sid=")/g, `$1n-${a.slug}-`).replace(/(\shref="#)/g, `$1n-${a.slug}-`)}</div><p class="meta"><a href="${u(a.url)}"><time datetime="${a.date}">${fmtDate(a.date)}</time></a>${a.tags.length ? ' · ' + a.tags.map((t) => `<a href="${u(`/tags/${tagSlug(t)}/`)}">#${esc(t)}</a>`).join(' ') : ''}</p></li>`).join('')}</ul>
+</section>`;
+    emit('/notes/', T.page({ title: 'Notes', path: u('/notes/'), body, crumbs: [homeCrumb, { label: 'Notes' }], description: `Short notes from ${C.name}.`, feed: '/rss.xml' }));
+  }
+}
+
+// ── Start here (an onboarding page assembled from the Best of list, series and topics) ──
+if (C.startPage?.enabled !== false && articles.length >= 3) {
+  const pick = bestList.length ? bestList.slice(0, 4) : articles.filter((a) => a.featured).concat(articles).filter((a, i, l) => l.indexOf(a) === i).slice(0, 3);
+  const sp = C.startPage || {};
+  const body = `<section class="panel panel--top">
+${panelHead({ kicker: 'New here?', title: sp.title || 'Start here', lede: esc(sp.lede || `${C.name} is ${C.description.replace(/\.$/, '').replace(/^A /, 'a ')}. Here is a short way in.`) })}
+<h2 class="startsec">${bestList.length ? 'The articles to read first' : 'Good places to begin'}</h2>
+<div class="cards">${pick.map((a) => T.articleCard(a, { level: 3 })).join('')}</div>
+${seriesList.length ? `<h2 class="startsec">Read in order</h2><ul class="catgrid">${seriesList.map((sr) => `<li><a href="${u(`/series/${sr.slug}/`)}"><span class="catgrid__name">${esc(sr.name)}</span><span class="count">${sr.parts.length}</span><span class="catgrid__desc">${esc(C.series?.[sr.name] || 'A series, in reading order.')}</span></a></li>`).join('')}</ul>` : ''}
+<h2 class="startsec">Browse by topic</h2>
+<ul class="catgrid">${categories.slice(0, 8).map((c) => `<li><a href="${u(`/categories/${c.slug}/`)}"><span class="catgrid__name">${esc(c.name)}</span><span class="count">${c.count}</span><span class="catgrid__desc">${esc(c.description || '')}</span></a></li>`).join('')}</ul>
+<h2 class="startsec">Follow along</h2>
+<p>Use the <a href="${u('/rss.xml')}">RSS feed</a>, <a href="${u('/atom.xml')}">Atom</a> or <a href="${u('/feed.json')}">JSON Feed</a> in any feed reader, or follow a single topic from its page. <a href="${u('/search/')}">Search</a> finds anything by title or text.</p>
+</section>`;
+  emit('/start/', T.page({ title: sp.title || 'Start here', path: u('/start/'), body, crumbs: [homeCrumb, { label: sp.title || 'Start here' }], description: `A short guide to ${C.name}: where to begin, what to read in order, and how to follow along.` }));
 }
 
 // ── Authors ──────────────────────────────────────────────────────────────────
@@ -723,7 +786,9 @@ ${p.tech.length ? `<ul class="chips">${p.tech.map((t) => `<li><span>${esc(t)}</s
 {
   const body = `<section class="panel panel--top">
 ${panelHead({ kicker: 'Saved on this device', title: 'Reading list', lede: 'Articles you saved with “Save for later”. The list lives only in this browser; nothing is sent anywhere.' })}
+<p class="streak" data-streak hidden></p>
 <div id="bookmarks" data-home="${esc(u('/writing/'))}" aria-live="polite"><p>Loading…</p></div>
+<p id="bookmarks-tools" class="share"></p>
 <noscript><p>The reading list needs JavaScript. Your saved articles stay in this browser.</p></noscript>
 </section>`;
   emit('/bookmarks/', T.page({ title: 'Reading list', path: u('/bookmarks/'), body, crumbs: [homeCrumb, { label: 'Reading list' }], description: 'Articles saved to read later.', noindex: true, scripts: ['bookmarks.js'] }), { sitemap: false });
@@ -750,7 +815,8 @@ ${panelHead({ kicker: 'Multi-part writing', title: 'Series', lede: 'Articles tha
   emit('/series/', T.page({ title: 'Series', path: u('/series/'), body, crumbs: [homeCrumb, { label: 'Series' }], description: `Multi-part series on ${C.name}.` }));
   for (const sr of seriesList) {
     const b = `<section class="panel panel--top">
-${panelHead({ kicker: 'Series', title: sr.name, lede: `${sr.parts.length} part${sr.parts.length === 1 ? '' : 's'}, in reading order.` })}
+${panelHead({ kicker: 'Series', title: sr.name, lede: esc(C.series?.[sr.name] || `${sr.parts.length} part${sr.parts.length === 1 ? '' : 's'}, in reading order.`) })}
+<p class="series-start"><a class="btn" href="${u(sr.parts[0].url)}">Start with part 1 ${icon('arrow', 14)}</a> <span>${sr.parts.length} part${sr.parts.length === 1 ? '' : 's'} · about ${sr.parts.reduce((n, p) => n + p.readingTime, 0)} min in all</span></p>
 <ol class="series-parts">${sr.parts.map((p, i) => `<li><span class="series-parts__n" aria-hidden="true">${i + 1}</span>${T.articleCard(p, { level: 2 })}</li>`).join('')}</ol>
 </section>`;
     emit(`/series/${sr.slug}/`, T.page({ title: `${sr.name} (series)`, path: u(`/series/${sr.slug}/`), body: b,
@@ -782,31 +848,23 @@ ${panelHead({ kicker: 'Error 404', title: 'Page not found', lede: 'That page doe
 
 // ── Feeds ────────────────────────────────────────────────────────────────────
 {
-  const rfc = (d) => new Date(`${d}T00:00:00Z`).toUTCString();
-  const xml = (v) => esc(String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ''));
-  // Links inside article text are written as /path; a feed reader needs the full address
   const absolutise = (h) => h.replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${siteUrl}/`).replace(/(\ssrcset=")([^"]+)"/g, (m, a, v) => a + v.replace(/(^|,\s*)\//g, `$1${siteUrl}/`) + '"');
-  const items = articles.slice(0, 30).map((a) => `    <item>
-      <title>${xml(a.title)}</title>
-      <link>${xml(abs(u(a.url)))}</link>
-      <guid isPermaLink="true">${xml(abs(u(a.url)))}</guid>
-      <pubDate>${rfc(a.date)}</pubDate>
-      <category>${xml(a.category)}</category>
-      <description>${xml(a.excerpt)}</description>${C.feed?.fullText ? `\n      <content:encoded><![CDATA[${absolutise(a.html).replace(/]]>/g, ']]]]><![CDATA[>')}]]></content:encoded>` : ''}
-    </item>`).join('\n');
-  fs.writeFileSync(path.join(DIST, 'rss.xml'), `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
-  <channel>
-    <title>${xml(C.name)}</title>
-    <link>${xml(abs(u('/')))}</link>
-    <description>${xml(C.description)}</description>
-    <lastBuildDate>${rfc(articles[0]?.date || new Date().toISOString().slice(0, 10))}</lastBuildDate>
-    <language>${xml(C.language)}</language>
-    <atom:link href="${xml(abs(u('/rss.xml')))}" rel="self" type="application/rss+xml"/>
-${items}
-  </channel>
-</rss>
-`);
+  const toItem = (a) => ({ title: a.title, url: abs(u(a.url)), date: a.date, updated: a.updated, category: a.category, excerpt: a.excerpt, tags: a.tags || [], html: C.feed?.fullText ? absolutise(a.html) : '' });
+  const feedCtx = (title, description, selfPath, list) => ({ title, description, language: C.language, home: abs(u('/')), self: abs(u(selfPath)), items: list.slice(0, 30).map(toItem), fullText: !!C.feed?.fullText, author: C.author?.name });
+  const main = (p, list = articles, title = C.name, desc = C.description) => {
+    const ctx = feedCtx(title, desc, p, list);
+    fs.mkdirSync(path.dirname(path.join(DIST, p)), { recursive: true });
+    fs.writeFileSync(path.join(DIST, p), rssXml(ctx));
+    if (p === '/rss.xml') {
+      fs.writeFileSync(path.join(DIST, 'atom.xml'), atomXml({ ...ctx, self: abs(u('/atom.xml')) }));
+      fs.writeFileSync(path.join(DIST, 'feed.json'), jsonFeed({ ...ctx, self: abs(u('/feed.json')) }));
+    }
+  };
+  main('/rss.xml');
+  if (C.feed?.perTopic !== false) {
+    for (const c of categories) main(`/categories/${c.slug}/rss.xml`, c.articles, `${C.name} — ${c.name}`, c.description || `${c.name} articles from ${C.name}.`);
+    for (const t of tags) main(`/tags/${t.slug}/rss.xml`, t.articles, `${C.name} — #${t.name}`, `Articles tagged ${t.name}.`);
+  }
   const latest = articles[0]?.date;
   fs.writeFileSync(path.join(DIST, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

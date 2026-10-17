@@ -3,3 +3,5 @@ dist/
 writer/.trash/
 .DS_Store
 .cache/
+writer/.history/
+.lighthouseci/

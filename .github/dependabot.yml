@@ -1,0 +1,16 @@
+# Weekly pull requests that update the packages and GitHub Actions this site uses.
+# Each pull request runs the tests (see .github/workflows/test.yml); merge it when they pass.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

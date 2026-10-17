@@ -90,7 +90,11 @@ export default {
       { label: 'About', href: '/about/' },
       { label: 'Archive', href: '/archive/' },
       { label: 'Contact', href: '/contact/' },
+      { label: 'Start here', href: '/start/' },
       { label: 'Best of', href: '/best/' },
+      { label: 'Notes', href: '/notes/' },
+      { label: 'Now', href: '/now/' },
+      { label: 'Uses', href: '/uses/' },
       { label: 'Glossary', href: '/glossary/' },
       { label: 'Reading list', href: '/bookmarks/' },
     ],
@@ -245,7 +249,10 @@ export default {
 
   // ── RSS feed ───────────────────────────────────────────────────────────────
   // fullText: true puts the whole article in the feed (best for RSS-to-email services and feed readers).
-  feed: { fullText: false },
+  feed: { fullText: false, perTopic: true }, // perTopic: also write an RSS feed for every tag and category
+  helpful: { enabled: true }, // the "Was this helpful?" buttons under articles (answers stay in the reader's browser)
+  startPage: { enabled: true }, // /start/ — a short guide for new visitors. Optional: title, lede
+  series: {}, // optional intro text per series, e.g. { 'My Series': 'What this series covers.' }
 
   // ── Write from a browser (optional) ────────────────────────────────────────
   // Adds /admin/, an editor that saves straight to your GitHub repository (works on a phone).
@@ -275,6 +282,7 @@ export default {
 
     accent: '#b8431f',
     'accent-strong': '#9c3516',
+    'accent-fill': '#b8431f', // background for buttons that carry white text (must keep 4.5:1 contrast)
     link: '#0f5a4f',
 
     panel: '#f6f2e4',
@@ -314,6 +322,7 @@ export default {
     link: '#6fcbb7',
     accent: '#e0693f',
     'accent-strong': '#f08058',
+    'accent-fill': '#bd4620',
     'side-bg': '#0d2926',
     'code-bg': '#071a18',
     'code-bar': '#0f2d29',

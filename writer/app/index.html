@@ -58,6 +58,13 @@
           <div class="f" id="trans-box" hidden><label for="f-trans">Translation of <small>(slug of the original)</small></label><input id="f-trans" placeholder="original-article-slug"></div>
           <div class="f f--checks f--inline"><label><input type="checkbox" id="f-best"> Show in “Best of”</label></div>
           <div class="f f--checks f--inline"><label><input type="checkbox" id="f-comments" checked> Allow comments (when enabled on the site)</label></div>
+          <div class="f f--checks f--inline"><label><input type="checkbox" id="f-note"> Short note (listed on the Notes page)</label></div>
+          <div class="f f--checks f--inline"><label><input type="checkbox" id="f-sheet"> Offer a one-page printable sheet</label></div>
+          <div class="f f--checks f--inline"><label><input type="checkbox" id="f-helpful" checked> Ask “Was this helpful?”</label></div>
+          <div class="f"><label for="f-rating">Rating <small>(reviews, 1–5)</small></label><input id="f-rating" type="number" min="1" max="5" step="0.5" inputmode="decimal"></div>
+          <div class="f"><label for="f-reviewitem">Item reviewed <small>(book, tool…)</small></label><input id="f-reviewitem"></div>
+          <div class="f f--wide"><label for="f-social">Social preview text <small>(shown when shared; falls back to the excerpt)</small></label><input id="f-social" maxlength="300"></div>
+          <div class="f f--wide"><label for="f-change">Log a change <small>(adds today to “What changed” and sets “Updated”)</small></label><input id="f-change" maxlength="200" placeholder="e.g. Added a section on branches"></div>
         </div>
         <p class="more__hint">A date in the future schedules the article: it stays hidden until that day.</p>
       </details>
@@ -81,12 +88,13 @@
       <button type="button" data-act="ol" title="Numbered list">1. List</button>
       <button type="button" data-act="quote" title="Quote">Quote</button>
       <button type="button" data-act="table" title="Table">Table</button>
+      <button type="button" data-act="footnote" title="Footnote">Note¹</button>
       <button type="button" data-act="faq" title="Question &amp; answer (expandable)">FAQ</button>
       <button type="button" data-act="image" title="Insert image (or paste / drop one)">Image</button>
       <input type="file" id="img-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
     </div>
 
-    <div class="goalrow"><button type="button" class="readability" id="readability" hidden title="Reading level and long sentences — press for details"></button><span class="goal" id="goal" hidden><progress id="goal-bar" max="100" value="0" aria-label="Progress toward your word goal"></progress><span id="goal-text"></span></span></div>
+    <div class="goalrow"><button type="button" class="readability" id="btn-check" title="Check the article before you publish it">Checklist</button><button type="button" class="readability" id="btn-links" title="Your own articles you could link to">Link ideas</button><button type="button" class="readability" id="btn-history" title="Earlier saved versions of this article">Versions</button><button type="button" class="readability" id="readability" hidden title="Reading level and long sentences — press for details"></button><span class="goal" id="goal" hidden><progress id="goal-bar" max="100" value="0" aria-label="Progress toward your word goal"></progress><span id="goal-text"></span></span></div>
 
     <div class="split" id="split" data-view="write">
       <textarea id="f-body" class="editor" spellcheck="true" placeholder="Start writing in Markdown…&#10;&#10;## A heading&#10;Paste or drop an image straight in."></textarea>
@@ -97,6 +105,7 @@
 
 <dialog id="pub"><h2>Publish to your website</h2><p id="pub-sum"></p><ul id="pub-list" class="pub-list"></ul><label class="pub-msg">Commit message <input id="pub-msg" maxlength="120"></label><pre id="pub-out" hidden></pre><form method="dialog" class="pub-actions"><button class="btn" value="close">Close</button><button class="btn btn--primary" id="pub-go" value="go" type="button">Publish now</button></form></dialog>
 <dialog id="dlg"><h2 id="dlg-title"></h2><pre id="dlg-text"></pre><form method="dialog"><button class="btn btn--primary">Close</button></form></dialog>
+<dialog id="tool"><h2 id="tool-title"></h2><div id="tool-body"></div><form method="dialog" class="pub-actions"><button class="btn btn--primary">Close</button></form></dialog>
 <script src="/app/app.js" defer></script>
 </body>
 </html>

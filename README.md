@@ -102,6 +102,13 @@ Your article, in Markdown.
 | `featured` | no | `true` pins it in the home page and sidebar. The newest featured article wins |
 | `draft` | no | `true` hides it. Build with `INCLUDE_DRAFTS=1` to see drafts locally |
 | `readingTime` | no | Minutes. Calculated from the word count if omitted |
+| `type` | no | `note` makes it a short post: it is also listed on `/notes/` in full |
+| `social` | no | Text shown when the link is shared (Open Graph / X cards). Falls back to the excerpt |
+| `changes` | no | A list of `"2026-10-01: What changed"` lines, shown as "What changed in this article" (the Writer's "Log a change" box adds these for you) |
+| `rating`, `reviewItem` | no | A review: a 1–5 rating (halves allowed) and what was reviewed. Shows stars and adds review markup for search engines |
+| `sheet` | no | `true` adds a "One-page sheet" button that prints the article compactly in two columns (good for cheat sheets) |
+| `helpful` | no | `false` hides the "Was this helpful?" buttons |
+| `audio`, `audioTitle`, `chapters` | no | An audio version: a file in `public/audio/` (`/audio/post.mp3`) or an `https://` address, plus optional `chapters` lines like `"01:30 The main idea"` that jump to a time |
 
 Front matter values must fit on one line. Quote a value that starts with `[` or a quotation mark.
 
@@ -190,6 +197,39 @@ npm run import -- export.xml --download-images --pages --dry-run
 ```
 
 *WordPress:* Tools → Export → Posts. *Blogger:* Settings → Manage blog → Back up content (or Google Takeout). Posts become Markdown files in `content/articles/`, with title, date, category and tags filled in; unpublished ones get `draft: true`; YouTube embeds become the site's click-to-play video; scripts are dropped. Nothing is overwritten unless you add `--force`. `--download-images` copies pictures (PNG, JPEG, GIF, WebP up to 8 MB) into `public/images/imported/`; `--pages` also imports static pages. Always read the imported files before publishing: old themes' shortcodes are reported but not converted.
+
+### Footnotes, notes, reviews, audio and slides
+
+- **Footnotes:** write `text[^1]` and, anywhere in the file, `[^1]: The note.` The notes are numbered in order, listed at the end of the article, and each has a back-link. In the Writer press **Note¹**.
+- **Heading links:** pressing the `#` beside a heading copies a link to that section.
+- **Contents button:** on phones a floating **Contents** button opens the table of contents.
+- **Read marks:** when a reader reaches the end of an article, a "✓ Read" mark appears next to it in lists. This, and the day streak shown on the Reading list page, stays in the reader's own browser. The Reading list page can also **export** and **import** the list as a file.
+- **Was this helpful?** Yes/No buttons under articles. The answer stays in the reader's browser; if you use GoatCounter, it also records a count (event) per page. Turn off site-wide with `helpful: { enabled: false }`.
+- **Slides:** every article with two or more `##` sections has a **Slides** button: a full-screen slideshow (arrow keys, swipe, Esc).
+- **Notes:** `type: note` posts (see the front matter table). The page `/notes/` appears in the footer once you have one.
+- **Start here:** `/start/` is built for you from your Best of list, series and topics. Change its title or intro under `startPage` in `site.config.js`, or switch it off with `startPage: { enabled: false }`. Give a series an introduction with `series: { 'Series name': 'What it covers.' }`.
+- **Now and Uses pages:** `content/pages/now.md` and `uses.md` are starting points; edit them like any page.
+
+### Feeds
+
+The main feed is `/rss.xml`; the same articles are also at `/atom.xml` and `/feed.json` (JSON Feed). Every category and tag has its own feed too (`/tags/<tag>/rss.xml`, `/categories/<name>/rss.xml`) with a "Follow … by RSS" link on its page. Switch the per-topic feeds off with `feed: { perTopic: false }`; put full article text in the feeds with `feed: { fullText: true }`.
+
+### The Writer's extra tools
+
+- **Checklist:** title and excerpt length, tags, cover, missing image descriptions, TODOs, `http://` links, links to articles that do not exist, skipped heading levels, draft/scheduled status. The Publish window mentions how many things it found.
+- **Link ideas:** finds your own articles that the text already names (one press links it) and related ones to add as a "See also".
+- **Versions:** the text as it was before each save (at most one a minute, 40 kept) in `writer/.history/`. Restoring loads it into the editor; nothing changes until you press Save.
+- **Images:** photos over 250 KB are shrunk to at most 1600 px wide before they are saved (JPEG stays JPEG, PNG becomes WebP). The new size is shown.
+- **Log a change:** type what you changed under *More options*; saving adds a dated line to "What changed" and sets the Updated date.
+- **Spelling:** the editor uses your browser's spell-check. To teach it your own words, right-click the underlined word and choose *Add to dictionary*.
+
+### Quality checks and automatic jobs
+
+- `npm run check` (also run by `npm test`) now includes an **accessibility audit**: heading order, links and buttons with no name, fields with no label, and the **colour contrast** of every text/background pair in your theme (4.5:1). Change a colour in `site.config.js` and it tells you if it became hard to read.
+- `.github/workflows/test.yml` runs the tests on every pull request.
+- `.github/dependabot.yml` opens weekly pull requests for package and Actions updates (the tests above run on them).
+- `.github/workflows/lighthouse.yml` (monthly, or run it by hand) measures speed, accessibility, SEO and best practices.
+- `.github/workflows/backup.yml` zips your writing every Sunday and keeps the newest 8 as GitHub releases (Releases page).
 
 ### Check outside links
 

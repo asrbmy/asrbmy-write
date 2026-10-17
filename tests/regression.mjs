@@ -8,6 +8,8 @@ import { wrapTitle, cardSvg, drawable } from '../scripts/og.js';
 import { collectLinks, checkOne, runPool } from '../scripts/linkcheck.js';
 import { wpautop, readWordPress, readBlogger, readMarkdownFile, convertPosts, downloadImages, frontMatter } from '../scripts/import.js';
 import { adminConfig, adminHtml, CMS_SRC, CMS_INTEGRITY } from '../scripts/cms.js';
+import { rssXml, atomXml, jsonFeed } from '../scripts/feeds.js';
+import { contrast, contrastIssues, auditHtml } from '../scripts/a11y.js';
 import { renderMarkdown, parseFrontmatter, cleanUrl, sanitizeHtml } from '../scripts/markdown.js';
 
 let failed = 0;
@@ -179,6 +181,36 @@ ta('browser editor settings: valid YAML, pinned script with an integrity hash', 
   }
   assert.ok(/@sveltia\/cms@\d+\.\d+\.\d+\//.test(CMS_SRC) && /^sha384-[A-Za-z0-9+/]{64}$/.test(CMS_INTEGRITY));
   assert.ok(adminHtml(C).includes(`integrity="${CMS_INTEGRITY}"`) && adminHtml(C).includes('noindex'));
+});
+
+t('footnotes: numbered in order of use, repeated refs, back-links, unknown refs left alone', () => {
+  const h = html('A[^x] B[^y] C[^x] D[^nope] `[^x]`\n\n[^x]: First *note*\n  more\n[^y]: Second');
+  assert.equal((h.match(/class="fnref"/g) || []).length, 3);
+  assert.match(h, /id="fnref-x-2"/); assert.match(h, /<li id="fn-x">First <em>note<\/em> more/); assert.match(h, /\[\^nope\]/); assert.match(h, /<code>\[\^x\]<\/code>/);
+  assert.equal(html('no notes here').includes('footnotes'), false);
+});
+t('footnote text cannot inject HTML', () => assert.ok(!/<script|onerror/i.test(html('x[^1]\n\n[^1]: <img src=x onerror=alert(1)><script>alert(2)</script>'))));
+t('headings cannot take footnote ids', () => assert.ok(!/id="fn-title"|id="fn-a"/.test(html('## fn-title\n\n## fn-a'))));
+const feedCtx = { title: 'T & <Co>', description: 'd', language: 'en', home: 'https://x.test/', self: 'https://x.test/rss.xml', fullText: true, author: 'Me',
+  items: [{ title: 'A "q" \u0001 <b>', url: 'https://x.test/a/', date: '2026-01-02', updated: '2026-02-03', category: 'C', excerpt: 'e & f', tags: ['t1'], html: '<p>hi ]]> there</p>' }] };
+t('RSS, Atom and JSON Feed escape and stay well-formed', () => {
+  const r = rssXml(feedCtx), a = atomXml(feedCtx), j = JSON.parse(jsonFeed(feedCtx));
+  assert.ok(!/\u0001/.test(r + a + jsonFeed(feedCtx))); assert.ok(r.includes('T &amp; &lt;Co&gt;') && a.includes('T &amp; &lt;Co&gt;'));
+  assert.ok(r.includes(']]]]><![CDATA[>')); assert.ok(a.includes('<updated>2026-02-03T00:00:00Z</updated>'));
+  assert.equal(j.version, 'https://jsonfeed.org/version/1.1'); assert.deepEqual(j.items[0].tags, ['C', 't1']); assert.equal(j.items[0].date_modified, '2026-02-03T00:00:00Z');
+});
+ta('contrast maths and the shipped theme pass WCAG AA', async () => {
+  assert.ok(Math.abs(contrast('#000000', '#ffffff') - 21) < 0.01); assert.ok(contrast('#777777', '#ffffff') < 4.5);
+  const cfg = (await import('../site.config.js')).default;
+  assert.deepEqual(contrastIssues(cfg), []);
+  assert.equal(contrastIssues({ theme: { text: '#999999', panel: '#ffffff' } }).length > 0, true);
+});
+t('accessibility audit finds skipped headings, empty links/buttons and unlabeled fields', () => {
+  const bad = '<a class="skip" href="#main">x</a><main><h1>T</h1><h3>Skip</h3><a href="/x/"></a><button></button><input id="q"></main>';
+  const msgs = auditHtml(bad, 'p').join('|');
+  for (const w of ['jumps from h1 to h3', 'link with no text', 'button with no accessible name', 'no label']) assert.ok(msgs.includes(w), w);
+  const good = '<a class="skip" href="#main">x</a><main><h1>T</h1><h2>S</h2><a href="/x/">Read</a><button aria-label="Go"></button><label for="q">Q</label><input id="q"><a href="/y/" aria-hidden="true" tabindex="-1"><img alt=""></a></main>';
+  assert.deepEqual(auditHtml(good, 'p'), []);
 });
 
 await Promise.all(pending);

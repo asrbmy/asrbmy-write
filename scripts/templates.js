@@ -47,7 +47,7 @@ export function createTemplates(S) {
   function articleCard(a, { featured = false, level = 2 } = {}) {
     return `<article class="card${featured ? ' card--featured' : ''}${a.cover ? ' card--cover' : ''}">
   ${a.cover ? `<a class="card__cover" href="${u(a.url)}" tabindex="-1" aria-hidden="true"><img src="${esc(S.imgSrc(a.cover))}" alt="" width="1200" height="630" loading="lazy" decoding="async"></a>` : ''}
-  <p class="kicker">${catLink(a.category)}</p>
+  <p class="kicker">${catLink(a.category)}${a.kind === 'note' ? ' <span class="chip chip--note">Note</span>' : ''}${a.rating ? ` <span class="chip chip--note" title="Rated ${a.rating} out of 5">★ ${a.rating}/5</span>` : ''}${a.audio ? ' <span class="chip chip--note">Audio</span>' : ''}</p>
   <h${level} class="card__title"><a href="${u(a.url)}">${esc(a.title)}</a></h${level}>
   <p class="card__excerpt">${esc(a.excerpt)}</p>
   <div class="card__foot">${metaLine(a)}${tagChips(a.tags)}</div>
@@ -164,6 +164,8 @@ export function createTemplates(S) {
   ${targets.map((t) => `<a class="share__btn" href="${esc(links[t][1])}" rel="noopener noreferrer"${t === 'email' ? '' : ' target="_blank"'}>${esc(links[t][0])}</a>`).join('\n  ')}
   <button type="button" class="share__btn" data-bookmark aria-pressed="false">${icon('bookmark', 14)} <span>Save for later</span></button>
   <button type="button" class="share__btn" data-print>${icon('print', 14)} Print / PDF</button>
+  ${a.sheet ? `<button type="button" class="share__btn" data-sheet>${icon('print', 14)} One-page sheet</button>` : ''}
+  ${(a.toc || []).length >= 2 ? `<button type="button" class="share__btn" data-slides>${icon('text', 14)} Slides</button>` : ''}
   <span class="share__status" role="status" aria-live="polite"></span>
 </div>`;
   }
@@ -275,6 +277,7 @@ export function createTemplates(S) {
   function page(o) {
     const full = o.path === u('/') || o.noSuffix ? o.title : `${o.title} · ${C.name}`;
     const desc = (o.description || C.description).replace(/\s+/g, ' ').trim();
+    const socialText = (o.social || desc).replace(/\s+/g, ' ').trim();
     const canon = S.abs(o.canonicalPath || o.path);
     const seo = C.seo || {};
     const ogRaw = o.ogImage || seo.ogImage || '/og-default.png';
@@ -290,6 +293,7 @@ export function createTemplates(S) {
       'font-src': ["'self'"],
       'connect-src': ["'self'", ...(analytics?.connect || []), ...(S.views?.views ? [S.views.origin] : [])],
       'frame-src': [...(cm ? ['https://giscus.app'] : []), ...(f.video ? ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'] : [])],
+      'media-src': ["'self'", ...(o.media || [])],
       'manifest-src': ["'self'"],
       'form-action': ["'self'", ...(newsletter ? [newsletter.origin] : []), ...(o.formOrigins || [])],
       'base-uri': ["'self'"],
@@ -331,7 +335,7 @@ ${analytics ? analytics.tag : ''}
 <meta property="og:site_name" content="${esc(C.name)}">
 <meta property="og:locale" content="${esc(seo.locale || 'en_US')}">
 <meta property="og:title" content="${esc(o.title)}">
-<meta property="og:description" content="${esc(desc)}">
+<meta property="og:description" content="${esc(socialText)}">
 <meta property="og:type" content="${a ? 'article' : 'website'}">
 <meta property="og:url" content="${esc(canon)}">
 <meta property="og:image" content="${esc(ogImg)}">
@@ -344,7 +348,7 @@ ${a ? `<meta property="article:published_time" content="${a.published}">
 ${a.tags.map((t) => `<meta property="article:tag" content="${esc(t)}">`).join('\n')}` : ''}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(o.title)}">
-<meta name="twitter:description" content="${esc(desc)}">
+<meta name="twitter:description" content="${esc(socialText)}">
 <meta name="twitter:image" content="${esc(ogImg)}">
 ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="${u(C.logo.favicon)}">
@@ -352,6 +356,9 @@ ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
 <link rel="manifest" href="${u('/manifest.webmanifest')}">
 ${S.offline ? `<meta name="asrbmy-sw" content="${esc(u('/sw.js'))}" data-scope="${esc(u('/'))}">` : ''}
 <link rel="alternate" type="application/rss+xml" title="${esc(C.name)}" href="${u('/rss.xml')}">
+<link rel="alternate" type="application/atom+xml" title="${esc(C.name)} (Atom)" href="${u('/atom.xml')}">
+<link rel="alternate" type="application/feed+json" title="${esc(C.name)} (JSON Feed)" href="${u('/feed.json')}">
+${o.feed ? `<link rel="alternate" type="application/rss+xml" title="${esc(o.title)}" href="${esc(u(o.feed))}">` : ''}
 <script>${THEME_SCRIPT}</script>
 <link rel="stylesheet" href="${S.asset('tokens.css')}">
 <link rel="stylesheet" href="${S.asset('theme.css')}">

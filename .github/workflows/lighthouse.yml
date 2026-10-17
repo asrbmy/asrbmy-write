@@ -1,0 +1,28 @@
+name: Lighthouse
+
+# Measures speed, accessibility, best practices and SEO on a few pages, on demand and every month.
+# The scores appear in the run's summary. The run fails if accessibility drops below 90%.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 1 * *'
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          QUIET: '1'
+      - name: Run Lighthouse
+        run: npx --yes @lhci/cli@0.14.0 autorun --config=lighthouserc.json

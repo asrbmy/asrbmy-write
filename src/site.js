@@ -445,6 +445,157 @@
     }).catch(() => { /* the counter is optional */ });
   }
 
+  // ── Small helpers for the features below ───────────────────────────────────
+  const toast = (msg) => {
+    let t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.append(t); }
+    t.textContent = msg; t.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 2200);
+  };
+  const jsonGet = (k, d) => { try { const v = JSON.parse(store.get(k) || 'null'); return v ?? d; } catch { return d; } };
+
+  // ── Heading links: pressing the # beside a heading copies a link to that section ──
+  document.addEventListener('click', async (e) => {
+    const a = e.target.closest && e.target.closest('a.anchor');
+    if (!a) return;
+    e.preventDefault();
+    const hash = a.getAttribute('href');
+    try { history.replaceState(null, '', hash); } catch { /* ignore */ }
+    document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    let ok = true; try { await copyText(location.origin + location.pathname + hash); } catch { ok = false; }
+    toast(ok ? 'Link to this section copied' : 'Link is in the address bar');
+  });
+
+  // ── Articles you have finished: a ✓ on cards and links, and a reading streak ──
+  const DONE = 'asrbmy-done';
+  const doneList = () => { const v = jsonGet(DONE, []); return Array.isArray(v) ? v.filter((x) => x && typeof x.u === 'string') : []; };
+  const paintDone = () => {
+    const done = new Set(doneList().map((x) => x.u));
+    if (!done.size) return;
+    document.querySelectorAll('.card__title a, .related a, .upnext__title, .prevnext__item span, .series__list a').forEach((el) => {
+      const link = el.closest('a') || el.parentElement.querySelector('a');
+      const href = link && link.getAttribute('href');
+      if (!href || !done.has(href.split('#')[0]) || el.querySelector('.chip--done') || el.parentElement.querySelector(':scope > .chip--done')) return;
+      const chip = document.createElement('span'); chip.className = 'chip chip--done'; chip.textContent = '✓ Read'; chip.title = 'You finished this one';
+      (el.tagName === 'A' ? el : el.firstElementChild || el).insertAdjacentElement('afterend', chip);
+    });
+  };
+  const streakOf = (list) => {
+    const days = new Set(list.map((x) => x.d)); let n = 0; const d = new Date();
+    if (!days.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1); // today may not be read yet
+    while (days.has(d.toISOString().slice(0, 10))) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  };
+  if (article) {
+    const here = location.pathname;
+    let marked = doneList().some((x) => x.u === here);
+    const check = () => {
+      if (marked) return;
+      const r = article.getBoundingClientRect();
+      if (r.bottom <= innerHeight + 60 && scrollY > 200) {
+        marked = true;
+        const list = doneList().filter((x) => x.u !== here); list.unshift({ u: here, d: new Date().toISOString().slice(0, 10) });
+        store.set(DONE, JSON.stringify(list.slice(0, 500)));
+      }
+    };
+    addEventListener('scroll', check, { passive: true });
+  }
+  paintDone();
+  document.querySelectorAll('[data-streak]').forEach((el) => {
+    const list = doneList(); if (!list.length) return;
+    const n = streakOf(list);
+    el.textContent = `You have finished ${list.length} article${list.length === 1 ? '' : 's'}` + (n > 1 ? ` · ${n}-day reading streak` : '') + '.';
+    el.hidden = false;
+  });
+
+  // ── Contents button on small screens ───────────────────────────────────────
+  const tocList = document.querySelector('.side-toc ol, .toc__list');
+  if (article && tocList) {
+    const fab = document.createElement('button'); fab.type = 'button'; fab.className = 'toc-fab'; fab.textContent = 'Contents'; fab.setAttribute('aria-haspopup', 'dialog');
+    const sheet = document.createElement('div'); sheet.className = 'toc-sheet'; sheet.hidden = true; sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-modal', 'true'); sheet.setAttribute('aria-label', 'Contents');
+    const inner = document.createElement('div'); inner.className = 'toc-sheet__box';
+    const h = document.createElement('p'); h.className = 'toc-sheet__title'; h.textContent = 'On this page';
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'toc-sheet__close'; close.textContent = 'Close';
+    inner.append(h, tocList.cloneNode(true), close); sheet.append(inner); document.body.append(fab, sheet);
+    const set = (open) => { sheet.hidden = !open; fab.setAttribute('aria-expanded', String(open)); if (open) close.focus(); else fab.focus(); };
+    fab.addEventListener('click', () => set(true));
+    close.addEventListener('click', () => set(false));
+    sheet.addEventListener('click', (e) => { if (e.target === sheet || e.target.closest('a')) set(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheet.hidden) set(false); });
+  }
+
+  // ── "Was this helpful?" (the answer stays in this browser; GoatCounter gets an event if it is switched on) ──
+  document.querySelectorAll('[data-helpful]').forEach((box) => {
+    const KEYH = 'asrbmy-helpful', id = box.dataset.helpful;
+    const msg = box.querySelector('.helpful__msg'), more = box.querySelector('.helpful__more');
+    const show = (v) => {
+      box.querySelectorAll('[data-vote]').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.vote === v)); });
+      msg.hidden = false; msg.textContent = v === 'yes' ? 'Glad it helped. Thank you.' : 'Thanks for saying so. I would like to fix that.';
+      more.hidden = v !== 'no' || !more.textContent.trim();
+    };
+    const prev = jsonGet(KEYH, {})[id]; if (prev) show(prev);
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-vote]'); if (!b) return;
+      const all = jsonGet(KEYH, {}); all[id] = b.dataset.vote; store.set(KEYH, JSON.stringify(all)); show(b.dataset.vote);
+      try { window.goatcounter && window.goatcounter.count && window.goatcounter.count({ path: `helpful-${b.dataset.vote}${id}`, title: `Helpful: ${b.dataset.vote}`, event: true }); } catch { /* optional */ }
+    });
+  });
+
+  // ── Audio chapters ─────────────────────────────────────────────────────────
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-seek]'); if (!b) return;
+    const au = document.querySelector('.audio audio'); if (!au) return;
+    au.currentTime = Number(b.dataset.seek) || 0; au.play().catch(() => { /* needs a tap first */ });
+  });
+
+  // ── One-page print sheet ───────────────────────────────────────────────────
+  document.querySelector('[data-sheet]')?.addEventListener('click', () => {
+    document.body.classList.add('sheet-mode');
+    const off = () => { document.body.classList.remove('sheet-mode'); removeEventListener('afterprint', off); };
+    addEventListener('afterprint', off); window.print();
+  });
+
+  // ── Slides: turn the article into a slideshow (arrow keys, swipe, Esc) ─────
+  document.querySelector('[data-slides]')?.addEventListener('click', (ev) => {
+    const prose = document.querySelector('.article .prose'); if (!prose) return;
+    const opener = ev.currentTarget;
+    const slides = [];
+    let cur = { title: document.querySelector('.article .title')?.textContent || document.title, nodes: [], intro: true };
+    for (const n of prose.children) {
+      if (n.tagName === 'H2') { slides.push(cur); cur = { title: n.cloneNode(true).childNodes[0]?.textContent || n.textContent.replace(/#$/, ''), nodes: [] }; }
+      else cur.nodes.push(n);
+    }
+    slides.push(cur);
+    const deck = slides.filter((s) => s.nodes.length || s.intro);
+    if (deck.length < 2) return;
+    const ov = document.createElement('div'); ov.className = 'slides'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Slides');
+    const stage = document.createElement('div'); stage.className = 'slides__stage'; stage.tabIndex = -1;
+    const bar = document.createElement('div'); bar.className = 'slides__bar';
+    const mk = (t, l) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.setAttribute('aria-label', l); return b; };
+    const prev = mk('←', 'Previous slide'), next = mk('→', 'Next slide'), shut = mk('Close', 'Close slides'); const count = document.createElement('span'); count.setAttribute('aria-live', 'polite');
+    bar.append(prev, count, next, shut); ov.append(stage, bar); document.body.append(ov); document.body.classList.add('slides-open');
+    let i = 0;
+    const draw = () => {
+      const s = deck[i]; stage.textContent = '';
+      const h = document.createElement(s.intro ? 'h1' : 'h2'); h.textContent = s.title; stage.append(h);
+      const body = document.createElement('div'); body.className = 'prose';
+      s.nodes.forEach((n) => { const c = n.cloneNode(true); c.querySelectorAll('.anchor,[id]').forEach((x) => { if (x.classList.contains('anchor')) x.remove(); else x.removeAttribute('id'); }); body.append(c); });
+      stage.append(body); count.textContent = `${i + 1} / ${deck.length}`; prev.disabled = i === 0; next.disabled = i === deck.length - 1; stage.scrollTop = 0;
+    };
+    const go = (d) => { i = Math.max(0, Math.min(deck.length - 1, i + d)); draw(); };
+    const end = () => { ov.remove(); document.body.classList.remove('slides-open'); removeEventListener('keydown', key, true); opener.focus(); };
+    const key = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); end(); }
+      else if (e.key === 'ArrowRight' || e.key === 'PageDown' || (e.key === ' ' && e.target === stage)) { e.preventDefault(); go(1); }
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(-1); }
+      else if (e.key === 'Tab') { const f = [...ov.querySelectorAll('button:not(:disabled)'), stage]; const k = f.indexOf(document.activeElement); const n = e.shiftKey ? (k <= 0 ? f.length - 1 : k - 1) : (k + 1) % f.length; e.preventDefault(); f[n].focus(); }
+    };
+    addEventListener('keydown', key, true);
+    prev.addEventListener('click', () => go(-1)); next.addEventListener('click', () => go(1)); shut.addEventListener('click', end);
+    let x0 = null; ov.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+    ov.addEventListener('touchend', (e) => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 60) go(dx < 0 ? 1 : -1); }, { passive: true });
+    draw(); stage.focus();
+  });
+
   // ── Offline reading (service worker) ───────────────────────────────────────
   const swMeta = document.querySelector('meta[name="asrbmy-sw"]');
   if (swMeta && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

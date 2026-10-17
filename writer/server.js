@@ -85,7 +85,8 @@ function serveStatic(res, file, transform) {
 }
 
 // ── Front matter ─────────────────────────────────────────────────────────────
-const ORDER = ['title', 'slug', 'date', 'updated', 'category', 'tags', 'excerpt', 'subtitle', 'author', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf', 'readingTime'];
+const ORDER = ['title', 'slug', 'date', 'updated', 'category', 'tags', 'excerpt', 'subtitle', 'author', 'featured', 'draft', 'series', 'seriesOrder', 'cover', 'coverAlt', 'comments', 'best', 'lang', 'translationOf', 'type', 'social', 'rating', 'reviewItem', 'sheet', 'helpful', 'audio', 'audioTitle', 'chapters', 'changes', 'readingTime'];
+const BLOCK_LISTS = new Set(['changes', 'chapters']); // lines that may contain commas, written one per line
 function fmValue(v) {
   if (Array.isArray(v)) return `[${v.map((x) => String(x).replace(/[,\[\]]/g, '').trim()).filter(Boolean).join(', ')}]`;
   if (typeof v === 'boolean') return String(v);
@@ -99,7 +100,9 @@ function serialize(front, body) {
   for (const k of keys) {
     const v = front[k];
     if (k === 'comments') { if (v === false) lines.push('comments: false'); continue; } // comments are on unless switched off
+    if (k === 'helpful') { if (v === false) lines.push('helpful: false'); continue; } // on unless switched off
     if (v === undefined || v === null || v === '' || v === false || (Array.isArray(v) && !v.length)) continue;
+    if (BLOCK_LISTS.has(k) && Array.isArray(v)) { lines.push(`${k}:`); for (const x of v) lines.push(`  - "${String(x).replace(/\s+/g, ' ').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`); continue; }
     lines.push(`${k}: ${fmValue(v)}`);
   }
   lines.push('---', '');
@@ -111,7 +114,7 @@ const words = (md) => (md.trim() ? md.trim().split(/\s+/).length : 0);
 function listFiles() {
   return fs.readdirSync(ARTICLES).filter((f) => FILE_RE.test(f)).map((file) => {
     const { data, body } = parseFrontmatter(fs.readFileSync(path.join(ARTICLES, file), 'utf8'));
-    return { file, title: data.title || file, date: data.date || '', category: data.category || '', draft: data.draft === true, featured: data.featured === true, slug: slugOf(file, data), tags: Array.isArray(data.tags) ? data.tags : [], series: data.series || '', words: words(body) };
+    return { file, lang: data.lang || '', title: data.title || file, date: data.date || '', category: data.category || '', draft: data.draft === true, featured: data.featured === true, slug: slugOf(file, data), tags: Array.isArray(data.tags) ? data.tags : [], series: data.series || '', words: words(body) };
   }).sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.title.localeCompare(b.title));
 }
 
@@ -125,11 +128,33 @@ function validate(front, body, currentFile) {
   if (front.seriesOrder !== undefined && front.seriesOrder !== '' && !(Number.isFinite(Number(front.seriesOrder)) && Number(front.seriesOrder) > 0)) throw new HttpError(400, 'Part number must be a positive number.');
   if (front.cover && !/^(https:\/\/|\/?images\/|\/?public\/images\/)/i.test(String(front.cover).trim())) throw new HttpError(400, 'Cover image must be a file in images (like /images/cover.jpg) or an https:// address.');
   if (front.lang && !/^[a-z]{2,3}(-[A-Za-z0-9]+)*$/.test(String(front.lang))) throw new HttpError(400, 'The language must be a code such as en, hi or pt-BR.');
+  if (front.rating !== undefined && front.rating !== '' && !(Number(front.rating) >= 1 && Number(front.rating) <= 5)) throw new HttpError(400, 'The rating must be between 1 and 5.');
+  if (front.audio && !/^(\/audio\/|https:\/\/)/i.test(String(front.audio))) throw new HttpError(400, 'Audio must be a file under /audio/ or an https:// address.');
+  if (front.type && !['note', 'article'].includes(String(front.type))) front.type = '';
   front.category = String(front.category || W.defaultCategory || 'Notes').trim();
   front.tags = Array.isArray(front.tags) ? front.tags : String(front.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const clash = listFiles().find((a) => a.file !== currentFile && a.slug === front.slug);
   if (clash) throw new HttpError(409, `Another article (${clash.file}) already uses the slug “${front.slug}”. Change the slug.`);
   return front;
+}
+
+// ── Version history: the text as it was before each save (at most one per minute, newest 40 kept) ──
+const HISTORY = path.join(HERE, '.history');
+const histDir = (file) => path.join(HISTORY, file.replace(/\.md$/, ''));
+function snapshot(file, fp) {
+  try {
+    const dir = histDir(file);
+    const old = fs.readFileSync(fp, 'utf8');
+    fs.mkdirSync(dir, { recursive: true });
+    const names = fs.readdirSync(dir).filter((n) => /^\d{10,14}\.md$/.test(n)).sort();
+    const last = names[names.length - 1];
+    if (last) {
+      if (fs.readFileSync(path.join(dir, last), 'utf8') === old) return;
+      if (Date.now() - Number(last.slice(0, -3)) < 60000) return;
+    }
+    fs.writeFileSync(path.join(dir, `${Date.now()}.md`), old);
+    for (const n of names.slice(0, Math.max(0, names.length + 1 - 40))) fs.rmSync(path.join(dir, n), { force: true });
+  } catch { /* history is best-effort and must never block saving */ }
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -149,6 +174,20 @@ async function api(req, res, p, url) {
   }
   if (method === 'GET' && p === '/api/articles') return json(res, 200, listFiles());
 
+  if ((m = p.match(/^\/api\/history\/([^/]+)(?:\/(\d{10,14}))?$/)) && method === 'GET') {
+    let file; try { file = decodeURIComponent(m[1]); } catch { throw new HttpError(400, 'Bad file name'); }
+    articlePath(file);
+    const dir = histDir(file);
+    if (m[2]) {
+      const f = path.join(dir, `${m[2]}.md`);
+      if (!fs.existsSync(f)) throw new HttpError(404, 'That version is gone.');
+      const { data, body } = parseFrontmatter(fs.readFileSync(f, 'utf8'));
+      return json(res, 200, { front: data, body });
+    }
+    const names = fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => /^\d{10,14}\.md$/.test(n)).sort().reverse() : [];
+    return json(res, 200, names.map((n) => { const { data, body } = parseFrontmatter(fs.readFileSync(path.join(dir, n), 'utf8')); return { id: n.slice(0, -3), at: Number(n.slice(0, -3)), title: data.title || file, words: words(body) }; }));
+  }
+
   if ((m = p.match(/^\/api\/articles\/([^/]+?)(\/raw)?$/))) {
     let file;
     try { file = decodeURIComponent(m[1]); } catch { throw new HttpError(400, 'Bad file name'); }
@@ -164,6 +203,7 @@ async function api(req, res, p, url) {
       if (!fs.existsSync(fp)) throw new HttpError(404, 'Not found');
       const { front = {}, body = '' } = await readJson(req);
       validate(front, body, file);
+      snapshot(file, fp);
       writeAtomic(fp, serialize(front, body));
       return json(res, 200, { ok: true, file, slug: front.slug, savedAt: new Date().toISOString() });
     }

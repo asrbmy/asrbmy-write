@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { auditHtml, contrastIssues } from './a11y.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -41,6 +42,7 @@ for (const file of htmlFiles) {
   if ((html.match(/<a\s[^>]*>/g) || []).some((t) => /target="_blank"/.test(t) && !/rel="[^"]*noopener/.test(t))) problems.push(`${rel}: target=_blank link without rel=noopener`);
   if (!/<title>[^<]+<\/title>/.test(html)) problems.push(`${rel}: missing <title>`);
   if ((html.match(/<h1[\s>]/g) || []).length !== 1) problems.push(`${rel}: expected exactly one <h1>`);
+  problems.push(...auditHtml(html, rel));
   // SEO basics
   const desc = (html.match(/<meta name="description" content="([^"]*)"/) || [])[1] || '';
   if (!desc) problems.push(`${rel}: missing meta description`);
@@ -72,7 +74,7 @@ for (const file of htmlFiles) {
     const pth = m[1];
     if (!exists(base && pth.startsWith(base + '/') ? pth.slice(base.length) : pth)) problems.push(`${rel}: hreflang link to missing page ${pth}`);
   }
-  if (rel === 'index.html' && /name="robots" content="noindex/.test(html)) problems.push('index.html must not be noindex');
+  if (rel === 'index.html' && /name="robots" content="noindex/.test(html) && !/class="previewbar"/.test(html)) problems.push('index.html must not be noindex');
   for (const m of html.matchAll(/\s(?:href|src)="([^"]*)"/g)) {
     let url = m[1];
     if (!url || /^(https?:|mailto:|tel:|data:|javascript:)/.test(url)) continue;
@@ -89,8 +91,9 @@ for (const file of htmlFiles) {
   }
 }
 
+problems.push(...contrastIssues(cfg));
 const offlineOn = cfg.offline?.enabled !== false;
-for (const f of ['rss.xml', 'sitemap.xml', 'search-index.json', 'robots.txt', '404.html', 'assets/theme.css', 'assets/tokens.css', 'assets/site.js', ...(offlineOn ? ['sw.js', 'offline/index.html'] : [])]) {
+for (const f of ['rss.xml', 'atom.xml', 'feed.json', 'sitemap.xml', 'search-index.json', 'robots.txt', '404.html', 'assets/theme.css', 'assets/tokens.css', 'assets/site.js', ...(offlineOn ? ['sw.js', 'offline/index.html'] : [])]) {
   if (!fs.existsSync(path.join(DIST, f))) problems.push(`missing ${f}`);
 }
 if (offlineOn && fs.existsSync(path.join(DIST, 'sw.js'))) {
@@ -99,7 +102,8 @@ if (offlineOn && fs.existsSync(path.join(DIST, 'sw.js'))) {
   const list = (sw.match(/const PRECACHE = (\[.*\]);/) || [])[1];
   try { for (const u of JSON.parse(list)) if (!exists((base && u.startsWith(base + '/') ? u.slice(base.length) : u).split('?')[0])) problems.push(`sw.js: precached file missing ${u}`); } catch { problems.push('sw.js: PRECACHE list is not valid'); }
 }
-try { JSON.parse(fs.readFileSync(path.join(DIST, 'search-index.json'), 'utf8')); } catch { problems.push('search-index.json is not valid JSON'); }
+for (const f of ['search-index.json', 'feed.json']) { try { JSON.parse(fs.readFileSync(path.join(DIST, f), 'utf8')); } catch { problems.push(`${f} is not valid JSON`); } }
+for (const f of ['rss.xml', 'atom.xml']) { const x = fs.readFileSync(path.join(DIST, f), 'utf8'); if (!/^<\?xml[\s\S]*<\/(rss|feed)>\s*$/.test(x) || /\u0000/.test(x)) problems.push(`${f} looks malformed`); }
 
 if (problems.length) {
   console.error(`✖ ${problems.length} problem(s):\n` + problems.map((p) => '  - ' + p).join('\n'));

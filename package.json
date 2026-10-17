@@ -18,7 +18,8 @@
     "links": "node scripts/linkcheck.js",
     "import": "node scripts/import.js",
     "build:drafts": "node scripts/build.js --drafts",
-    "dev:drafts": "node scripts/serve.js --watch --drafts"
+    "dev:drafts": "node scripts/serve.js --watch --drafts",
+    "a11y": "node scripts/check.js"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.3.0",
