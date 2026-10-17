@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Reading Papers Without Drowning
 slug: reading-papers-without-drowning
 date: 2026-07-31

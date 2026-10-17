@@ -267,6 +267,18 @@ Headings (a table of contents is built from `##` and `###` when there are three 
 
 `content/pages/*.md` become top-level pages (`about.md` → `/about/`). They accept `{{name}}`, `{{author}}`, `{{bio}}`, `{{description}}` and `{{tagline}}`, so these pages follow your config. The Contact page is generated from `contact` and `social` in the config.
 
+## Go-live checklist (production)
+
+1. `npm run doctor` lists what is still left over from the template: placeholder address, no contact method, sample content, missing privacy page. Fix the lines marked `!`.
+2. `npm run fresh` moves the sample articles, projects and Now/Uses/Changelog pages into `content-samples/` (nothing is deleted; `npm run fresh -- --restore` puts them back). Then write your own, and rewrite **About**, **Now** and **Uses**.
+3. In `site.config.js` set your name, tagline, description, author, `contact.email` and `social` links. Replace `public/og-default.png` (1200×630) and the logo/icons in `public/`.
+4. `npm test` must end with a green check (the same test runs on GitHub before every deploy; a failure stops the deploy and the old site stays up).
+5. Push to GitHub and set **Settings → Pages → Source: GitHub Actions**.
+6. **Custom domain (optional):** create `public/CNAME` containing only your domain (for example `write.example.com`), set `url: 'https://write.example.com'` and `base: ''` in `site.config.js`, add the DNS records GitHub shows under Settings → Pages, then tick **Enforce HTTPS**.
+7. Turn on **Settings → Branches → branch protection** for `main` if other people can push, and keep GitHub two-factor sign-in on.
+8. For Google and Bing: add your site in Search Console / Webmaster Tools, choose the "HTML tag" method, and paste only the code into `seo.verify` in `site.config.js`. Then open the live site on a phone, check the privacy page matches the services you switched on, and submit `https://your-site/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
+9. After going live: the weekly jobs (outside-link check, backup, Dependabot) run by themselves. Read the Actions tab once a month.
+
 ## Change the site name, logo and navigation
 
 Open **`site.config.js`**. Change `name` and the header, `<title>`, footer, RSS feed and social metadata all follow. The same file holds the tagline, description, author, navigation (with dropdowns), footer links, social links and sidebar quote.

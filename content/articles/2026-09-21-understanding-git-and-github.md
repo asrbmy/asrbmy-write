@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Understanding Git and GitHub
 slug: understanding-git-and-github
 date: 2026-09-21

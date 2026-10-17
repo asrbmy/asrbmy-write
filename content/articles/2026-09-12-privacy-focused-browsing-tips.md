@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Privacy-Focused Browsing Tips
 slug: privacy-focused-browsing-tips
 date: 2026-09-12

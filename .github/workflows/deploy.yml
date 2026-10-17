@@ -27,6 +27,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Stop before publishing if the tests fail, so a broken change never goes live
+      - run: npm run test:unit
+      # Production check: lists leftovers from the template (read it in the log; it never blocks the deploy)
+      - run: npm run doctor
+        continue-on-error: true
       # The build detects the repository name and sets the base path and site URL
       # automatically (user site → "/", project site → "/<repo>").
       # Custom domain? Uncomment and set your own values:

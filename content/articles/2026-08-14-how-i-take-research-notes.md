@@ -1,4 +1,5 @@
 ---
+sample: true
 title: How I Take Research Notes
 slug: how-i-take-research-notes
 date: 2026-08-14

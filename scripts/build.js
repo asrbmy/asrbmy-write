@@ -292,6 +292,9 @@ const hasRoute = (href) => {
   if (href === '/glossary/') return glossary.length > 0;
   if (href === '/series/') return seriesList.length > 0;
   if (href === '/authors/') return authorList.length > 1;
+  if (href === '/start/') return C.startPage?.enabled !== false && articles.length >= 3;
+  // pages that come from content/pages: a link to one you deleted is hidden instead of breaking
+  if ((m = href.match(/^\/(about|privacy|terms|changelog|now|uses)\/$/))) return fs.existsSync(path.join(ROOT, 'content/pages', `${m[1]}.md`));
   return true;
 };
 

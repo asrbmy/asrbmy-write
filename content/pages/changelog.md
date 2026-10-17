@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Changelog
 kicker: What changed
 lede: A short, dated list of changes to {{name}} itself.

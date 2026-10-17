@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Setting Up a Local Development Environment
 slug: setting-up-a-local-development-environment
 date: 2026-09-30

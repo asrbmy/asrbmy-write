@@ -1,4 +1,5 @@
 ---
+sample: true
 title: A Tour of the Writing Features
 date: 2026-10-12
 category: Tutorials

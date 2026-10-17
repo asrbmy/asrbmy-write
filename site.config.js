@@ -265,6 +265,8 @@ export default {
     autoImages: true, // make a share card (title on the site colours) for each article without a cover image
     locale: 'en_US',
     twitter: '', // e.g. '@yourhandle' (optional)
+    // Search-engine ownership codes (optional): paste only the code, not the whole tag.
+    verify: { google: '', bing: '' },
   },
 
   // ── Design tokens ──────────────────────────────────────────────────────────

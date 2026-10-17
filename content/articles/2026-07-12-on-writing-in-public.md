@@ -1,4 +1,5 @@
 ---
+sample: true
 title: On Writing in Public
 slug: on-writing-in-public
 date: 2026-07-12

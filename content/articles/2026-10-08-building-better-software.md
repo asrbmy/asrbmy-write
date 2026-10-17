@@ -1,4 +1,5 @@
 ---
+sample: true
 title: "Building Better Software: Notes, Research & Ideas"
 slug: building-better-software
 date: 2026-10-08

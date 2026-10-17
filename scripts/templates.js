@@ -351,6 +351,7 @@ ${a.tags.map((t) => `<meta property="article:tag" content="${esc(t)}">`).join('\
 <meta name="twitter:description" content="${esc(socialText)}">
 <meta name="twitter:image" content="${esc(ogImg)}">
 ${seo.twitter ? `<meta name="twitter:site" content="${esc(seo.twitter)}">` : ''}
+${o.path === u('/') && /^[\w-]{10,100}$/.test(seo.verify?.google || '') ? `<meta name="google-site-verification" content="${esc(seo.verify.google)}">` : ''}${o.path === u('/') && /^[\w-]{10,100}$/.test(seo.verify?.bing || '') ? `<meta name="msvalidate.01" content="${esc(seo.verify.bing)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="${u(C.logo.favicon)}">
 <link rel="apple-touch-icon" href="${u('/apple-touch-icon.png')}">
 <link rel="manifest" href="${u('/manifest.webmanifest')}">

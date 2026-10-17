@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Uses
 kicker: Tools and setup
 lede: The hardware, software and habits behind the writing.

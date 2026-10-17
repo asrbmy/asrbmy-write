@@ -1,4 +1,5 @@
 ---
+sample: true
 title: लेखन सुविधाओं का परिचय
 date: 2026-10-12
 lang: hi

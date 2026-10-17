@@ -1,4 +1,5 @@
 ---
+sample: true
 title: A short note on small posts
 date: 2026-10-14
 type: note

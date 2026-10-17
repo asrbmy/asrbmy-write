@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Now
 kicker: What I am doing
 lede: A short, honest snapshot of what has my attention at the moment.

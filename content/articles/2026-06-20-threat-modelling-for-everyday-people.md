@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Threat Modelling for Everyday People
 slug: threat-modelling-for-everyday-people
 date: 2026-06-20

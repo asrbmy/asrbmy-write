@@ -1,4 +1,5 @@
 ---
+sample: true
 title: Reading Notes Template
 summary: A small, reusable note format for taking research notes you can actually find again.
 status: Experiment

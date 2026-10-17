@@ -1,4 +1,5 @@
 ---
+sample: true
 title: ASRBMY Write
 summary: The static writing site you are reading, with a private Writer app that runs on your own computer.
 status: Active

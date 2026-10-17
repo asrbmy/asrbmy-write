@@ -1,4 +1,5 @@
 ---
+sample: true
 title: "Learning Python: A Beginner's Guide"
 slug: learning-python-a-beginners-guide
 date: 2026-08-29
